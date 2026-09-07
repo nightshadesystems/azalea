@@ -1,0 +1,9 @@
+{
+    "system_arch": "x86_64",
+    "system_type": "bare metal",
+    "boot_via": "livecd",
+    "hardware_vendor": "Unknown",
+    "hardware_model": "Unknown",
+    "hardware_serial": "Unknown",
+    "hardware_uuid": "Unknown"
+}

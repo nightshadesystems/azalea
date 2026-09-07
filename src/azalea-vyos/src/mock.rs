@@ -201,6 +201,7 @@ impl OpBackend for MockOp {
             built_on: "Thu 01 Aug 2024 12:00 UTC".into(),
             architecture: "x86_64".into(),
             boot_via: "installed image".into(),
+            system_type: "KVM guest".into(),
             hardware_vendor: "QEMU".into(),
             hardware_model: "Standard PC (Q35 + ICH9, 2009)".into(),
             azalea_version: azalea_common::VERSION.to_string(),

@@ -13,7 +13,10 @@ pub struct SystemInfo {
     pub release_train: String,
     pub built_on: String,
     pub architecture: String,
+    /// `installed image` or `livecd`.
     pub boot_via: String,
+    /// `bare metal` or `<hypervisor> guest`.
+    pub system_type: String,
     pub hardware_vendor: String,
     pub hardware_model: String,
     /// Azalea's own version.

@@ -1,0 +1,6 @@
+{
+    "system_arch": "x86_64",
+    "system_type": "container",
+    "boot_via": "container image",
+    "secure_boot": "n/a (container)"
+}

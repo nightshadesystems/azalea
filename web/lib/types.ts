@@ -24,6 +24,7 @@ export interface SystemInfo {
   built_on: string;
   architecture: string;
   boot_via: string;
+  system_type: string;
   hardware_vendor: string;
   hardware_model: string;
   azalea_version: string;
