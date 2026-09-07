@@ -99,6 +99,40 @@ impl InterfaceKind {
         }
     }
 
+    /// Where an interface lives in the config tree, for the kinds the
+    /// UI can edit: `interfaces ethernet eth0`, or for a VIF
+    /// `interfaces <parent type> <parent> vif <id>`. QinQ (`eth0.100.200`)
+    /// and every other kind return `None`.
+    pub fn config_path(name: &str) -> Option<Vec<String>> {
+        let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect());
+        if let Some((parent, vid)) = name.split_once('.') {
+            if parent.contains('.') || !parent.chars().any(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            let id: u16 = vid.parse().ok()?;
+            if !(1..=4094).contains(&id) || vid != id.to_string() {
+                return None;
+            }
+            let prefix: String = parent
+                .chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect();
+            let parent_type = match prefix.as_str() {
+                "eth" => "ethernet",
+                "bond" => "bonding",
+                "br" => "bridge",
+                "peth" => "pseudo-ethernet",
+                "wlan" => "wireless",
+                _ => return None,
+            };
+            return words(&["interfaces", parent_type, parent, "vif", vid]);
+        }
+        match Self::from_name(name) {
+            Self::Ethernet => words(&["interfaces", "ethernet", name]),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ethernet => "ethernet",
@@ -172,6 +206,36 @@ pub struct InterfaceDetail {
     pub raw: String,
 }
 
+/// `GET /api/config/interfaces/<name>` — one interface's configuration
+/// subtree as VyOS renders it to JSON: a leaf is a string or a list of
+/// strings, a valueless node is `{}`, a container is an object.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterfaceConfig {
+    pub name: String,
+    pub kind: InterfaceKind,
+    /// The node's config path, e.g. `["interfaces", "ethernet", "eth0"]`.
+    pub path: Vec<String>,
+    pub config: serde_json::Value,
+}
+
+/// `POST /api/config/interfaces` — set/delete paths relative to the
+/// interface node; webd prefixes the interface path itself so a request
+/// can only ever touch that one subtree.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterfaceConfigChange {
+    pub interface: String,
+    #[serde(default)]
+    pub set: Vec<Vec<String>>,
+    #[serde(default)]
+    pub delete: Vec<Vec<String>>,
+}
+
+/// What a successful commit + save printed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigApplied {
+    pub output: String,
+}
+
 /// Interface summary for the dashboard.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceSummary {
@@ -217,6 +281,28 @@ mod tests {
         assert_eq!(InterfaceKind::from_name("lo"), InterfaceKind::Loopback);
         assert_eq!(InterfaceKind::from_name("dum0"), InterfaceKind::Dummy);
         assert_eq!(InterfaceKind::from_name("pppoe0"), InterfaceKind::Other);
+    }
+
+    #[test]
+    fn config_paths_for_editable_kinds() {
+        let p = |n: &str| InterfaceKind::config_path(n).map(|w| w.join(" "));
+        assert_eq!(p("eth0").as_deref(), Some("interfaces ethernet eth0"));
+        assert_eq!(
+            p("eth1.100").as_deref(),
+            Some("interfaces ethernet eth1 vif 100")
+        );
+        assert_eq!(
+            p("bond0.10").as_deref(),
+            Some("interfaces bonding bond0 vif 10")
+        );
+        assert_eq!(p("br0.5").as_deref(), Some("interfaces bridge br0 vif 5"));
+        assert_eq!(p("eth0.100.200"), None);
+        assert_eq!(p("eth0.0"), None);
+        assert_eq!(p("eth0.4095"), None);
+        assert_eq!(p("eth0.0100"), None);
+        assert_eq!(p("wg0.1"), None);
+        assert_eq!(p("br0"), None);
+        assert_eq!(p("lo"), None);
     }
 
     #[test]

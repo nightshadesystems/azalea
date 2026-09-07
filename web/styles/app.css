@@ -24,7 +24,25 @@
 .kv>div:nth-child(-n+2){border-top:none}
 .kv .k{font-weight:600;color:var(--cds-alias-typography-color-450)}
 .kv .v{color:var(--cds-alias-typography-color-300)}
-/* login: company attribution under the brand block */
-.login-footer{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--ns-ink-9);position:absolute;left:64px;bottom:32px}
-.login-footer img{width:16px;height:16px}
-.nightshade-credit img{width:16px;height:16px;vertical-align:middle;margin-right:6px}
+/* login: mark + wordmark heading in the sign-in form, nudged down toward the fields */
+.login .login-heading{display:flex;align-items:center;gap:10px;margin-top:40px;margin-bottom:4px}
+/* interface edit modal: two-column field grid, flag list, multi-value editor */
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+.cfg-grid .clr-form-control{margin-top:16px}
+.cfg-grid .clr-form-control:nth-child(-n+2){margin-top:4px}
+.cfg-grid .clr-input,.cfg-grid .clr-select-wrapper{max-width:none;width:100%}
+.cfg-grid .cfg-full{grid-column:1/-1}
+.cfg-flags{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;margin-top:20px}
+.cfg-flags .clr-checkbox-wrapper{align-items:flex-start}
+.cfg-flags .clr-checkbox-wrapper input[type=checkbox]{margin-top:2px}
+.cfg-flag-help{display:block;font-size:12px;line-height:16px;color:var(--cds-alias-typography-color-300);margin-top:2px}
+.cfg-multi{display:flex;flex-direction:column;gap:6px}
+.cfg-multi-row{display:flex;align-items:center;gap:8px;font-family:var(--ns-font-mono);font-size:13px;padding:4px 8px;border:1px solid var(--cds-alias-object-border-subtle);border-radius:var(--clr-base-border-radius-s)}
+.cfg-multi-row span{flex:1;word-break:break-all}
+.cfg-multi-add{display:flex;gap:8px}
+.cfg-multi-add .clr-input{flex:1;max-width:none}
+.cfg-commands{margin-top:20px;font-size:12px;color:var(--cds-alias-typography-color-300)}
+.cfg-commands summary{cursor:pointer;user-select:none}
+.cfg-commands pre{margin:8px 0 0;padding:8px 12px;background:var(--cds-alias-object-container-background-shade);border-radius:var(--clr-base-border-radius-s);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-all}
+.cfg-title-name{font-family:var(--ns-font-mono);font-weight:500}
+.modal-body .alert{margin-bottom:12px}

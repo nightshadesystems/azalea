@@ -26,13 +26,3 @@ export function Wordmark({ size = 17, color }: WordmarkProps) {
     </span>
   );
 }
-
-/** Company attribution: small Nightshade symbol + name. */
-export function NightshadeCredit({ className = '' }: { className?: string }) {
-  return (
-    <span className={'nightshade-credit ' + className}>
-      <img src="/brand/nightshade-symbol-on-dark.svg" alt="" />
-      by Nightshade Systems
-    </span>
-  );
-}

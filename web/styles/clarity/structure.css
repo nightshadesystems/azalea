@@ -52,8 +52,8 @@
 .login-wrapper{display:flex;min-height:100vh;background:var(--cds-alias-object-app-background)}
 .login-brand{flex:1;background:var(--cds-alias-object-container-background-dark);display:flex;flex-direction:column;justify-content:center;padding:64px;gap:24px;border-right:1px solid var(--cds-alias-object-border-subtle);position:relative;overflow:hidden}
 .login-brand::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(242,243,245,0.05) 1px,transparent 1px);background-size:24px 24px}
-.login-brand img{width:72px;position:relative}
-.login-brand .login-brand-title{font-size:32px;line-height:36px;font-weight:700;letter-spacing:-0.0125em;color:var(--ns-ink-11);position:relative}
+.login-brand img{width:56px;position:relative}
+.login-brand .login-brand-title{display:flex;align-items:center;gap:16px;font-size:32px;line-height:36px;font-weight:700;letter-spacing:-0.0125em;color:var(--ns-ink-11);position:relative}
 .login-brand .login-brand-sub{font-size:14px;line-height:20px;color:var(--ns-ink-9);max-width:360px;position:relative}
 .login{width:400px;flex:none;display:flex;flex-direction:column;justify-content:center;padding:48px;gap:8px;background:var(--cds-alias-object-container-background)}
 .login .title{font-size:24px;line-height:32px;font-weight:600;color:var(--cds-alias-typography-color-450)}

@@ -1,16 +1,57 @@
-//! Off-box backend: a plausible small router whose counters tick.
+//! Off-box backend: a plausible small router whose counters tick and
+//! whose interface configuration can be edited (in memory).
 
+use std::sync::Mutex;
 use std::time::Instant;
 
 use azalea_common::types::{
     CounterSample, Disk, Interface, InterfaceCounters, InterfaceDetail, InterfaceKind, LoadAverage,
     Memory, SystemInfo, SystemStatus,
 };
+use serde_json::{json, Value};
 
+use crate::config::{tree, ConfigBackend, ConfigBatch, ConfigError};
 use crate::op::{OpBackend, OpError};
+
+/// Leaves under an ethernet or VLAN node that take a value; VyOS knows
+/// from its schema, the mock from this list. Anything else the UI sets
+/// is a valueless node (`disable`, `offload gro`).
+const VALUE_LEAVES: &[&str] = &[
+    "description",
+    "mtu",
+    "mac",
+    "hw-id",
+    "speed",
+    "duplex",
+    "vrf",
+    "redirect",
+    "arp-cache-timeout",
+    "adjust-mss",
+    "source-validation",
+    "client-id",
+    "host-name",
+    "vendor-class-id",
+    "default-route-distance",
+    "duid",
+    "dup-addr-detect-transmits",
+    "accept-dad",
+    "egress-qos",
+    "ingress-qos",
+    "ingress",
+    "egress",
+    "route",
+    "route6",
+    "rx",
+    "tx",
+];
+/// ... and the ones VyOS declares multi-valued, so a second `set`
+/// appends rather than replaces.
+const MULTI_LEAVES: &[&str] = &["address", "eui64", "reject", "user-class"];
 
 pub struct MockOp {
     started: Instant,
+    /// The `interfaces` subtree, in VyOS's JSON rendering.
+    config: Mutex<Value>,
 }
 
 impl Default for MockOp {
@@ -23,6 +64,65 @@ impl MockOp {
     pub fn new() -> Self {
         Self {
             started: Instant::now(),
+            config: Mutex::new(Self::initial_config()),
+        }
+    }
+
+    /// `interfaces { ... }` for the mock router.
+    fn initial_config() -> Value {
+        json!({
+            "ethernet": {
+                "eth0": {
+                    "address": ["203.0.113.10/24", "2001:db8::10/64"],
+                    "description": "WAN",
+                    "hw-id": "52:54:00:a1:b2:01",
+                    "ip": { "source-validation": "strict" },
+                    "offload": { "gro": {}, "gso": {}, "sg": {}, "tso": {} }
+                },
+                "eth1": {
+                    "address": "192.168.1.1/24",
+                    "description": "LAN",
+                    "hw-id": "52:54:00:a1:b2:02",
+                    "vif": {
+                        "100": {
+                            "address": "192.168.100.1/24",
+                            "description": "Guest VLAN",
+                            "ip": { "enable-proxy-arp": {} }
+                        },
+                        "200": {
+                            "address": "192.168.200.1/24",
+                            "description": "IoT VLAN",
+                            "mtu": "1400"
+                        }
+                    }
+                },
+                "eth2": { "hw-id": "52:54:00:a1:b2:03" },
+                "eth3": { "description": "spare", "disable": {}, "hw-id": "52:54:00:a1:b2:04" },
+                "eth4": { "hw-id": "52:54:00:a1:b2:05", "speed": "1000", "duplex": "full" },
+                "eth5": { "hw-id": "52:54:00:a1:b2:05" }
+            },
+            "bridge": { "br0": { "address": "10.10.0.1/24", "description": "Servers",
+                "member": { "interface": { "eth2": {}, "eth3": {} } } } },
+            "bonding": { "bond0": { "address": "10.20.0.1/30", "description": "Uplink LAG",
+                "member": { "interface": ["eth4", "eth5"] } } }
+        })
+    }
+
+    fn config(&self) -> std::sync::MutexGuard<'_, Value> {
+        self.config
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Strings of a leaf: one value or a list.
+    fn values(node: Option<&Value>) -> Vec<String> {
+        match node {
+            Some(Value::String(s)) => vec![s.clone()],
+            Some(Value::Array(a)) => a
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+            _ => vec![],
         }
     }
 
@@ -73,7 +173,45 @@ impl MockOp {
         }
     }
 
+    /// The static rows, with description, addresses, MTU, MAC and admin
+    /// state taken from the config tree so edits show up in the grid.
     fn table(&self) -> Vec<Interface> {
+        let config = self.config().clone();
+        let mut rows = self.base_table();
+        for row in &mut rows {
+            let Some(path) = InterfaceKind::config_path(&row.name) else {
+                continue;
+            };
+            let Some(node) = tree::get(&config, &path[1..]) else {
+                continue;
+            };
+            row.description = Self::values(node.get("description"))
+                .pop()
+                .unwrap_or_default();
+            row.admin_up = node.get("disable").is_none();
+            row.oper_up = row.oper_up && row.admin_up;
+            if let Some(mtu) = Self::values(node.get("mtu"))
+                .pop()
+                .and_then(|m| m.parse().ok())
+            {
+                row.mtu = mtu;
+            }
+            if let Some(mac) = Self::values(node.get("mac")).pop() {
+                row.mac = mac;
+            }
+            row.addresses = Self::values(node.get("address"))
+                .into_iter()
+                .map(|a| match a.as_str() {
+                    "dhcp" => "198.51.100.23/24 (dhcp)".to_string(),
+                    "dhcpv6" => "2001:db8:1::23/64 (dhcpv6)".to_string(),
+                    _ => a,
+                })
+                .collect();
+        }
+        rows
+    }
+
+    fn base_table(&self) -> Vec<Interface> {
         let t = self.started.elapsed().as_secs();
         let i = Self::iface;
         vec![
@@ -295,10 +433,159 @@ impl OpBackend for MockOp {
     }
 }
 
+#[async_trait::async_trait]
+impl ConfigBackend for MockOp {
+    async fn subtree(&self, path: &[String]) -> Result<Value, ConfigError> {
+        if path.first().map(String::as_str) != Some("interfaces") {
+            return Ok(json!({}));
+        }
+        Ok(tree::get(&self.config(), &path[1..])
+            .cloned()
+            .unwrap_or_else(|| json!({})))
+    }
+
+    /// Deletes then sets, with the little validation the UI relies on
+    /// VyOS for: an MTU range and address syntax, so a bad edit is
+    /// refused the way a commit would refuse it.
+    async fn apply(&self, batch: &ConfigBatch) -> Result<String, ConfigError> {
+        let strip = |p: &Vec<String>| -> Result<Vec<String>, ConfigError> {
+            match p.first().map(String::as_str) {
+                Some("interfaces") if p.len() > 1 => Ok(p[1..].to_vec()),
+                _ => Err(ConfigError::Rejected(format!(
+                    "Configuration path: [{}] is not valid",
+                    p.join(" ")
+                ))),
+            }
+        };
+        for p in &batch.set {
+            validate_mock(p)?;
+        }
+        let mut config = self.config().clone();
+        for p in &batch.delete {
+            tree::delete(&mut config, &strip(p)?);
+        }
+        for p in &batch.set {
+            let p = strip(p)?;
+            let parent = p.len().checked_sub(2).map(|i| p[i].as_str());
+            let leaf = match parent {
+                Some(k) if MULTI_LEAVES.contains(&k) => tree::Leaf::Multi,
+                Some(k) if VALUE_LEAVES.contains(&k) => tree::Leaf::Single,
+                _ => tree::Leaf::Node,
+            };
+            tree::set(&mut config, &p, leaf);
+        }
+        *self.config() = config;
+        Ok(String::new())
+    }
+}
+
+/// A taste of VyOS's validators so the mock refuses what a router would.
+fn validate_mock(path: &[String]) -> Result<(), ConfigError> {
+    let refuse = |why: String| {
+        Err(ConfigError::Rejected(format!(
+            "{why}\n\nValue validation failed\nSet failed"
+        )))
+    };
+    let Some((value, rest)) = path.split_last() else {
+        return Ok(());
+    };
+    let Some(key) = rest.last() else {
+        return Ok(());
+    };
+    match key.as_str() {
+        "mtu" => match value.parse::<u32>() {
+            Ok(68..=16000) => Ok(()),
+            _ => refuse(format!("MTU {value} must be between 68 and 16000")),
+        },
+        "address" if rest.len() >= 3 && rest[rest.len() - 2] != "eui64" => {
+            let ok = matches!(value.as_str(), "dhcp" | "dhcpv6")
+                || value
+                    .split_once('/')
+                    .and_then(|(ip, len)| {
+                        let ip: std::net::IpAddr = ip.parse().ok()?;
+                        let len: u8 = len.parse().ok()?;
+                        Some(if ip.is_ipv4() { len <= 32 } else { len <= 128 })
+                    })
+                    .unwrap_or(false);
+            if ok {
+                Ok(())
+            } else {
+                refuse(format!("Invalid IPv4/IPv6 address/prefix {value:?}"))
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn config_edits_reach_the_table() {
+        let m = MockOp::new();
+        let path = InterfaceKind::config_path("eth1.100").unwrap();
+        let before = m.subtree(&path).await.unwrap();
+        assert_eq!(before["description"], "Guest VLAN");
+
+        let word = |p: &str| p.split(' ').map(String::from).collect::<Vec<_>>();
+        let set = vec![
+            word("interfaces ethernet eth1 vif 100 description Guests"),
+            word("interfaces ethernet eth1 vif 100 address 10.9.0.1/24"),
+            word("interfaces ethernet eth1 vif 100 disable"),
+        ];
+        let delete = vec![word("interfaces ethernet eth1 vif 100 ip enable-proxy-arp")];
+        m.apply(&ConfigBatch { set, delete }).await.unwrap();
+
+        let after = m.subtree(&path).await.unwrap();
+        assert_eq!(after["description"], "Guests");
+        assert_eq!(after["address"], json!(["192.168.100.1/24", "10.9.0.1/24"]));
+        assert_eq!(after["disable"], json!({}));
+        assert_eq!(after["ip"], json!({}));
+        let row = m
+            .interfaces()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|i| i.name == "eth1.100")
+            .unwrap();
+        assert_eq!(row.description, "Guests");
+        assert!(!row.admin_up);
+        assert_eq!(row.addresses.len(), 2);
+
+        // A flag under a container, then a replaced single value.
+        m.apply(&ConfigBatch {
+            set: vec![
+                word("interfaces ethernet eth2 offload gro"),
+                word("interfaces ethernet eth2 mtu 9000"),
+                word("interfaces ethernet eth2 mtu 1500"),
+            ],
+            delete: vec![],
+        })
+        .await
+        .unwrap();
+        let eth2 = m.subtree(&word("interfaces ethernet eth2")).await.unwrap();
+        assert_eq!(eth2["offload"], json!({ "gro": {} }));
+        assert_eq!(eth2["mtu"], "1500");
+
+        let bad = ConfigBatch {
+            set: vec![word("interfaces ethernet eth0 mtu 9")],
+            delete: vec![],
+        };
+        assert!(matches!(m.apply(&bad).await, Err(ConfigError::Rejected(_))));
+        let bad = ConfigBatch {
+            set: vec![word("interfaces ethernet eth0 address nonsense")],
+            delete: vec![],
+        };
+        assert!(matches!(m.apply(&bad).await, Err(ConfigError::Rejected(_))));
+        // Unrelated subtrees are refused rather than edited.
+        let bad = ConfigBatch {
+            set: vec![word("system host-name evil")],
+            delete: vec![],
+        };
+        assert!(matches!(m.apply(&bad).await, Err(ConfigError::Rejected(_))));
+    }
 
     #[tokio::test]
     async fn mock_is_internally_consistent() {

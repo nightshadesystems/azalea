@@ -1,6 +1,4 @@
-//! Login roles. `admin` may change things later; `operator` may look.
-//! Nothing is gated this session (the UI is read-only), but the session
-//! carries the role so RBAC can be added without a re-login.
+//! Login roles. `admin` may change configuration; `operator` may look.
 
 /// The refusal an operator sees on a privileged endpoint.
 pub const PERMISSION_DENIED: &str = "permission denied (operator role)";
@@ -39,9 +37,9 @@ impl std::fmt::Display for Role {
     }
 }
 
-/// webd API paths an operator may not POST to. Empty this session;
-/// webd's router test walks its POST routes against it.
-pub const ADMIN_WEB_PATHS: &[&str] = &[];
+/// webd API paths an operator may not POST to; webd's router test
+/// walks its POST routes against it.
+pub const ADMIN_WEB_PATHS: &[&str] = &["/api/config/interfaces"];
 
 pub fn web_requires_admin(path: &str) -> bool {
     ADMIN_WEB_PATHS.contains(&path)
@@ -60,5 +58,6 @@ mod tests {
         assert!(Role::Admin.is_admin());
         assert_eq!(Role::Admin.to_string(), "admin");
         assert!(!web_requires_admin("/api/interfaces"));
+        assert!(web_requires_admin("/api/config/interfaces"));
     }
 }

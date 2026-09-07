@@ -1,77 +1,20 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import Shell from '@/components/Shell';
-import { api, compareNames, formatBytes } from '@/lib/api';
-import { formatBitRate, useCounterStream } from '@/lib/stream';
-import type { Interface, InterfaceDetail, InterfaceKind } from '@/lib/types';
+import { api, compareNames } from '@/lib/api';
+import { useCounterStream } from '@/lib/stream';
+import { useSession } from '@/lib/session';
+import type { Interface, InterfaceKind } from '@/lib/types';
 import { Alert, Label } from '@/components/ds/misc';
+import { Button } from '@/components/ds/Button';
 import { Datagrid } from '@/components/ds/Datagrid';
 import { AdminLabel, KindLabel, OperLabel } from '@/components/status';
+import { InterfaceEditModal } from '@/components/InterfaceEditModal';
 
 // Without the stream (next dev cannot proxy WebSockets) refetch instead.
 const POLL_MS = 5000;
 
 const dash = <span className="dim">—</span>;
-
-function Detail({ row }: { row: Interface }) {
-  const [detail, setDetail] = useState<InterfaceDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api<InterfaceDetail>(`/api/interfaces/${encodeURIComponent(row.name)}`)
-      .then(setDetail)
-      .catch((e: Error) => setError(e.message));
-  }, [row.name]);
-  const c = row.counters;
-  return (
-    <div className="card-grid">
-      <div className="kv">
-        <div className="k">Type</div>
-        <div className="v"><KindLabel kind={row.kind} /></div>
-        {row.parent && (
-          <>
-            <div className="k">Parent</div>
-            <div className="v mono">{row.parent}</div>
-          </>
-        )}
-        {row.vlan_id != null && (
-          <>
-            <div className="k">VLAN ID</div>
-            <div className="v mono">{row.vlan_id}</div>
-          </>
-        )}
-        {row.members.length > 0 && (
-          <>
-            <div className="k">Members</div>
-            <div className="v mono">{row.members.join(', ')}</div>
-          </>
-        )}
-        <div className="k">MAC</div>
-        <div className="v mono">{row.mac || '—'}</div>
-        <div className="k">MTU</div>
-        <div className="v mono">{row.mtu}</div>
-        <div className="k">Addresses</div>
-        <div className="v mono">{row.addresses.length ? row.addresses.join(', ') : '—'}</div>
-        <div className="k">RX</div>
-        <div className="v mono">
-          {formatBytes(c.rx_bytes)} · {c.rx_packets} pkts · {c.rx_errors} err · {c.rx_dropped} drop
-        </div>
-        <div className="k">TX</div>
-        <div className="v mono">
-          {formatBytes(c.tx_bytes)} · {c.tx_packets} pkts · {c.tx_errors} err · {c.tx_dropped} drop
-        </div>
-      </div>
-      <div className="card-wide">
-        {error && <Alert status="danger" sm>{error}</Alert>}
-        {!detail && !error && (
-          <span className="dim">
-            <span className="spinner spinner-inline"></span>Loading show interfaces…
-          </span>
-        )}
-        {detail && <pre style={{ margin: 0 }}>{detail.raw.trimEnd()}</pre>}
-      </div>
-    </div>
-  );
-}
 
 export interface InterfacesGridProps {
   title: string;
@@ -82,7 +25,10 @@ export interface InterfacesGridProps {
 export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
   const [interfaces, setInterfaces] = useState<Interface[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; detail?: string } | null>(null);
   const { live, connected } = useCounterStream();
+  const admin = !!useSession()?.admin;
 
   const refresh = useCallback(() => {
     api<Interface[]>('/api/interfaces')
@@ -99,18 +45,18 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
     return () => clearInterval(timer);
   }, [connected, refresh]);
 
-  // Live counters and link state overlay the last full fetch.
+  // Live link state overlays the last full fetch.
   const rows = (interfaces || [])
     .filter((i) => kinds.length === 0 || kinds.includes(i.kind))
     .map((i) => {
       const l = live.get(i.name);
-      return l ? { ...i, oper_up: l.sample.oper_up, counters: l.sample.counters } : i;
+      return l ? { ...i, oper_up: l.sample.oper_up } : i;
     });
 
-  const rate = (name: string, dir: 'rx' | 'tx') => {
-    const l = live.get(name);
-    const bps = l ? (dir === 'rx' ? l.rxBps : l.txBps) : null;
-    return bps == null ? null : formatBitRate(bps);
+  const saved = (name: string, output: string) => {
+    setEditing(null);
+    setNotice({ text: `${name} committed and saved.`, detail: output.trim() || undefined });
+    refresh();
   };
 
   return (
@@ -128,6 +74,12 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
           {error}
         </Alert>
       )}
+      {notice && (
+        <Alert status="success" closable onClose={() => setNotice(null)} style={{ marginBottom: 16 }}>
+          {notice.text}
+          {notice.detail && <pre style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap', fontSize: 12 }}>{notice.detail}</pre>}
+        </Alert>
+      )}
       {!interfaces && !error && (
         <div className="page-loading">
           <span className="spinner spinner-md"></span>Loading…
@@ -135,10 +87,23 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
       )}
       {interfaces && (
         <Datagrid<Interface>
-          expandable
+          selectable
           rowKey={(r) => r.name}
           onRefresh={refresh}
-          renderDetail={(r) => <Detail row={r} />}
+          actionBar={({ selected }) => {
+            const one = selected.size === 1 ? String([...selected][0]) : null;
+            return (
+              <Button
+                sm
+                icon="pencil"
+                disabled={!one || !admin}
+                title={!admin ? 'Editing needs an admin login' : one ? `Edit ${one}` : 'Select one interface to edit'}
+                onClick={() => one && setEditing(one)}
+              >
+                Edit
+              </Button>
+            );
+          }}
           columns={[
             {
               key: 'name',
@@ -158,36 +123,13 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
             },
             { key: 'mtu', label: 'MTU', sortable: true, render: (r) => <span className="cell-mono">{r.mtu || '—'}</span> },
             { key: 'mac', label: 'MAC', render: (r) => (r.mac ? <span className="cell-mono">{r.mac}</span> : dash) },
-            {
-              key: 'rx',
-              label: 'RX',
-              sortable: true,
-              compare: (a, b) => a.counters.rx_bytes - b.counters.rx_bytes,
-              render: (r) => (
-                <span className="cell-mono" style={{ whiteSpace: 'nowrap' }}>
-                  {formatBytes(r.counters.rx_bytes)}
-                  {rate(r.name, 'rx') && <div className="dim">{rate(r.name, 'rx')}</div>}
-                </span>
-              ),
-            },
-            {
-              key: 'tx',
-              label: 'TX',
-              sortable: true,
-              compare: (a, b) => a.counters.tx_bytes - b.counters.tx_bytes,
-              render: (r) => (
-                <span className="cell-mono" style={{ whiteSpace: 'nowrap' }}>
-                  {formatBytes(r.counters.tx_bytes)}
-                  {rate(r.name, 'tx') && <div className="dim">{rate(r.name, 'tx')}</div>}
-                </span>
-              ),
-            },
           ]}
           rows={rows}
           pageSize={32}
           placeholder="No interfaces of this type."
         />
       )}
+      <InterfaceEditModal name={editing} onClose={() => setEditing(null)} onSaved={saved} />
     </Shell>
   );
 }

@@ -15,7 +15,7 @@ interface Tab extends NavItem {
 // Top tab bar. Add a tab here and a SIDE_NAV entry for its left nav.
 const TABS: Tab[] = [
   { label: 'Dashboard', href: '/dashboard/' },
-  { label: 'Interfaces', href: '/interfaces/all/', root: '/interfaces' },
+  { label: 'Interfaces', href: '/interfaces/ethernet/', root: '/interfaces' },
 ];
 
 // Left-hand navigation per tab.
@@ -23,13 +23,8 @@ const SIDE_NAV: Record<string, VerticalNavGroup> = {
   '/interfaces': {
     label: 'Interfaces',
     items: [
-      { id: '/interfaces/all/', label: 'All Interfaces', icon: 'view-list' },
       { id: '/interfaces/ethernet/', label: 'Ethernet', icon: 'network-settings' },
       { id: '/interfaces/vlan/', label: 'VLAN', icon: 'network-globe' },
-      { id: '/interfaces/bridge/', label: 'Bridge', icon: 'network-switch' },
-      { id: '/interfaces/bonding/', label: 'Bonding', icon: 'link' },
-      { id: '/interfaces/tunnels/', label: 'Tunnels / WireGuard', icon: 'shield' },
-      { id: '/interfaces/loopback/', label: 'Loopback', icon: 'host' },
     ],
   },
 };
@@ -119,10 +114,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="header-dropdown">
           <button style={{ cursor: 'default' }} tabIndex={-1}>
             <span className="hd-text">
-              <span className="hd-label">Signed in</span>
+              <span className="hd-label">Signed In</span>
               <span className="hd-value mono">
                 {session.username}
-                {session.role ? ` · ${session.role}` : ''}
+                {session.role ? ` - ${session.role}` : ''}
               </span>
             </span>
           </button>

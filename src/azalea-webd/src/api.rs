@@ -1,5 +1,6 @@
-//! The JSON API the web UI talks to. Read-only: every state endpoint
-//! asks the op backend per request; webd holds no cache to go stale.
+//! The JSON API the web UI talks to. Every state endpoint asks the op
+//! backend per request; webd holds no cache to go stale. Configuration
+//! edits go to the config backend one interface subtree at a time.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,8 +11,11 @@ use axum::http::{header, request::Parts, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, MethodRouter};
 use axum::{Json, Router};
-use azalea_common::types::{InterfaceSummary, StreamFrame};
-use azalea_vyos::{OpBackend, OpError};
+use azalea_common::types::{
+    ConfigApplied, InterfaceConfig, InterfaceConfigChange, InterfaceKind, InterfaceSummary,
+    StreamFrame,
+};
+use azalea_vyos::{ConfigBackend, ConfigBatch, ConfigError, OpBackend, OpError};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -19,6 +23,7 @@ use crate::auth::{self, Sessions};
 
 pub struct AppState {
     pub op: Arc<dyn OpBackend>,
+    pub config: Arc<dyn ConfigBackend>,
     /// Read once at start; shown on the login page before sign-in.
     pub hostname: String,
     pub sessions: Sessions,
@@ -42,6 +47,7 @@ fn get_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
         ("/api/system/tls", get(system_tls)),
         ("/api/interfaces", get(interfaces)),
         ("/api/interfaces/{name}", get(interface_detail)),
+        ("/api/config/interfaces/{name}", get(interface_config)),
         ("/api/stream", get(stream)),
     ]
 }
@@ -49,7 +55,11 @@ fn get_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
 /// Endpoints that change something. Everything here except the login
 /// paths must appear in `azalea_common::role::ADMIN_WEB_PATHS`.
 fn post_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
-    vec![("/api/login", post(login)), ("/api/logout", post(logout))]
+    vec![
+        ("/api/login", post(login)),
+        ("/api/logout", post(logout)),
+        ("/api/config/interfaces", post(interface_config_change)),
+    ]
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -70,23 +80,49 @@ pub fn router(state: SharedState) -> Router {
 // ---------------------------------------------------------------- errors
 
 /// Backend trouble surfaces as 502 with the cause; a missing interface
-/// as 404.
-struct ApiError(OpError);
+/// as 404; a change VyOS refused, or one webd will not pass on, as 400
+/// with the CLI's message.
+#[derive(Debug)]
+enum ApiError {
+    Op(OpError),
+    Config(ConfigError),
+    BadRequest(String),
+}
 
 impl From<OpError> for ApiError {
     fn from(err: OpError) -> Self {
-        Self(err)
+        Self::Op(err)
+    }
+}
+
+impl From<ConfigError> for ApiError {
+    fn from(err: ConfigError) -> Self {
+        Self::Config(err)
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match self.0 {
-            OpError::NoSuchInterface(_) => StatusCode::NOT_FOUND,
-            _ => StatusCode::BAD_GATEWAY,
+        let status = match &self {
+            Self::Op(OpError::NoSuchInterface(_)) => StatusCode::NOT_FOUND,
+            Self::Op(_) => StatusCode::BAD_GATEWAY,
+            Self::Config(ConfigError::Rejected(_)) => StatusCode::BAD_REQUEST,
+            Self::Config(_) => StatusCode::BAD_GATEWAY,
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
         };
-        tracing::warn!(err = %self.0, "api request failed");
-        (status, Json(json!({ "error": self.0.to_string() }))).into_response()
+        let message = self.to_string();
+        tracing::warn!(err = %message, "api request failed");
+        (status, Json(json!({ "error": message }))).into_response()
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Op(e) => e.fmt(f),
+            Self::Config(e) => e.fmt(f),
+            Self::BadRequest(m) => f.write_str(m),
+        }
     }
 }
 
@@ -265,6 +301,97 @@ async fn interface_detail(
     Ok(Json(state.op.interface_detail(&name).await?).into_response())
 }
 
+// ---------------------------------------------------------------- config
+
+/// The interface's config path, or why it cannot be edited here.
+fn editable_path(name: &str) -> Result<Vec<String>, ApiError> {
+    if !valid_interface_name(name) {
+        return Err(OpError::NoSuchInterface(name.to_string()).into());
+    }
+    InterfaceKind::config_path(name).ok_or_else(|| {
+        ApiError::BadRequest(format!(
+            "{name}: only ethernet and VLAN interfaces can be edited"
+        ))
+    })
+}
+
+async fn interface_config(
+    _op: Operator,
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+) -> Result<Response, ApiError> {
+    let path = editable_path(&name)?;
+    let config = state.config.subtree(&path).await?;
+    Ok(Json(InterfaceConfig {
+        kind: InterfaceKind::from_name(&name),
+        name,
+        path,
+        config,
+    })
+    .into_response())
+}
+
+/// Longest batch, path and word webd will pass on; VyOS validates the rest.
+const MAX_CHANGES: usize = 200;
+const MAX_PATH_WORDS: usize = 16;
+const MAX_WORD_LEN: usize = 256;
+
+/// The batch VyOS sees: every relative path prefixed with the
+/// interface's own, so nothing outside that subtree is reachable.
+fn scoped_batch(change: &InterfaceConfigChange) -> Result<ConfigBatch, ApiError> {
+    let base = editable_path(&change.interface)?;
+    if change.set.len() + change.delete.len() > MAX_CHANGES {
+        return Err(ApiError::BadRequest(format!(
+            "too many changes in one request (max {MAX_CHANGES})"
+        )));
+    }
+    if change.set.is_empty() && change.delete.is_empty() {
+        return Err(ApiError::BadRequest("nothing to change".into()));
+    }
+    let scope = |paths: &[Vec<String>]| -> Result<Vec<Vec<String>>, ApiError> {
+        paths
+            .iter()
+            .map(|rel| {
+                if rel.is_empty() || rel.len() > MAX_PATH_WORDS {
+                    return Err(ApiError::BadRequest(format!(
+                        "bad config path (1 to {MAX_PATH_WORDS} words): {rel:?}"
+                    )));
+                }
+                for word in rel {
+                    if word.is_empty()
+                        || word.len() > MAX_WORD_LEN
+                        || word.chars().any(char::is_control)
+                    {
+                        return Err(ApiError::BadRequest(format!("bad config word in {rel:?}")));
+                    }
+                }
+                Ok(base.iter().cloned().chain(rel.iter().cloned()).collect())
+            })
+            .collect()
+    };
+    Ok(ConfigBatch {
+        set: scope(&change.set)?,
+        delete: scope(&change.delete)?,
+    })
+}
+
+async fn interface_config_change(
+    op: Operator,
+    State(state): State<SharedState>,
+    Json(change): Json<InterfaceConfigChange>,
+) -> Result<Response, ApiError> {
+    let batch = scoped_batch(&change)?;
+    tracing::info!(
+        username = %op.0.username,
+        interface = %change.interface,
+        set = batch.set.len(),
+        delete = batch.delete.len(),
+        "config change"
+    );
+    let output = state.config.apply(&batch).await?;
+    Ok(Json(ConfigApplied { output }).into_response())
+}
+
 // ---------------------------------------------------------------- stream
 
 /// Counter samples every `STREAM_INTERVAL` while the socket is open.
@@ -325,6 +452,7 @@ fn valid_interface_name(name: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -365,6 +493,56 @@ mod tests {
             gated.is_empty(),
             "read-only routes must stay open: {gated:?}"
         );
+    }
+
+    #[test]
+    fn changes_are_scoped_to_the_interface() {
+        let w = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let change = InterfaceConfigChange {
+            interface: "eth1.100".into(),
+            set: vec![w("description Guests"), w("address 10.0.0.1/24")],
+            delete: vec![w("disable")],
+        };
+        let batch = scoped_batch(&change).unwrap();
+        assert_eq!(
+            batch.set[0].join(" "),
+            "interfaces ethernet eth1 vif 100 description Guests"
+        );
+        assert_eq!(
+            batch.delete[0].join(" "),
+            "interfaces ethernet eth1 vif 100 disable"
+        );
+
+        let refused = |change: InterfaceConfigChange| {
+            matches!(scoped_batch(&change), Err(ApiError::BadRequest(_)))
+        };
+        assert!(refused(InterfaceConfigChange {
+            interface: "eth0".into(),
+            ..Default::default()
+        }));
+        assert!(refused(InterfaceConfigChange {
+            interface: "br0".into(),
+            set: vec![w("description x")],
+            ..Default::default()
+        }));
+        assert!(refused(InterfaceConfigChange {
+            interface: "eth0".into(),
+            set: vec![vec!["description".into(), "a\nb".into()]],
+            ..Default::default()
+        }));
+        assert!(refused(InterfaceConfigChange {
+            interface: "eth0".into(),
+            set: vec![vec![]],
+            ..Default::default()
+        }));
+        assert!(matches!(
+            scoped_batch(&InterfaceConfigChange {
+                interface: "eth0;x".into(),
+                set: vec![w("description x")],
+                ..Default::default()
+            }),
+            Err(ApiError::Op(OpError::NoSuchInterface(_)))
+        ));
     }
 
     #[test]

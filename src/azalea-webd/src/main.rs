@@ -2,7 +2,8 @@
 //!
 //! Serves the exported Next.js UI (static files) and a JSON API from one
 //! origin, entirely in Rust (axum + rustls). Router state comes from the
-//! `azalea-vyos` op-mode backend; nothing here mutates config.
+//! `azalea-vyos` op-mode backend; interface edits go through its config
+//! backend (VyOS's own config session).
 //!
 //! On a router it listens on HTTPS only (`/config/azalea/azalea.toml`
 //! decides bind/port, default 0.0.0.0:8443) with a self-signed
@@ -21,7 +22,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use axum_server::tls_rustls::RustlsConfig;
 use azalea_common::settings::Settings;
-use azalea_vyos::{MockOp, OpBackend, VyosOp};
+use azalea_vyos::{ConfigBackend, MockOp, OpBackend, VyosConfig, VyosOp};
 use clap::Parser;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
@@ -145,11 +146,18 @@ async fn main() -> Result<()> {
         warn!(assets = %args.assets.display(), "no web UI build found; only /api will respond");
     }
 
-    let op: Arc<dyn OpBackend> = if args.mock {
+    let (op, config): (Arc<dyn OpBackend>, Arc<dyn ConfigBackend>) = if args.mock {
         warn!("serving the mock router (--mock)");
-        Arc::new(MockOp::new())
+        let mock = Arc::new(MockOp::new());
+        (mock.clone(), mock)
     } else {
-        Arc::new(VyosOp)
+        if !azalea_vyos::config::available() {
+            warn!(
+                python = azalea_vyos::config::PYTHON,
+                "not found; configuration edits will fail"
+            );
+        }
+        (Arc::new(VyosOp), Arc::new(VyosConfig::new()))
     };
     let hostname = op
         .system_info()
@@ -159,6 +167,7 @@ async fn main() -> Result<()> {
 
     let state: api::SharedState = Arc::new(api::AppState {
         op,
+        config,
         hostname: hostname.clone(),
         sessions: auth::Sessions::new(),
         dev_auth,

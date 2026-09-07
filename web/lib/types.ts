@@ -134,3 +134,30 @@ export interface InterfaceDetail {
   fields: [string, string][];
   raw: string;
 }
+
+/**
+ * VyOS's JSON rendering of a configuration node: a leaf is a string or
+ * a list of strings, a valueless node is `{}`, a container is an object.
+ */
+export type CfgNode = string | string[] | { [key: string]: CfgNode };
+
+/** GET /api/config/interfaces/<name> */
+export interface InterfaceConfig {
+  name: string;
+  kind: InterfaceKind;
+  /** The node's config path, e.g. ["interfaces", "ethernet", "eth0"]. */
+  path: string[];
+  config: CfgNode;
+}
+
+/** POST /api/config/interfaces — paths relative to the interface node. */
+export interface InterfaceConfigChange {
+  interface: string;
+  set: string[][];
+  delete: string[][];
+}
+
+/** What commit and save printed. */
+export interface ConfigApplied {
+  output: string;
+}

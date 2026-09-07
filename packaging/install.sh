@@ -135,7 +135,7 @@ else
     else
         url="$api/latest"
     fi
-    release=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$url") || die "cannot read release metadata from $url"
+    release=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$url") || die "no release found at $url (nothing published yet, or no such --version)"
     tag=$(printf '%s' "$release" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
     [ -n "$tag" ] || die "no release found"
     ver="${tag#v}"
