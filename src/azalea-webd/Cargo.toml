@@ -1,0 +1,65 @@
+[package]
+name = "azalea-webd"
+description = "Azalea web UI daemon for VyOS: serves the exported UI and a JSON API over HTTPS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+azalea-common = { workspace = true }
+azalea-vyos = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP server (pure Rust: axum/hyper + rustls). The ring crypto provider
+# is selected explicitly — the aws-lc default needs cmake/nasm to build.
+axum = "0.8"
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tower-http = { version = "0.6", features = ["fs"] }
+
+# Session tokens
+getrandom = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# Test fixtures hash passwords the way chpasswd would.
+sha-crypt = { version = "0.6", features = ["getrandom"] }
+
+[lints]
+workspace = true
+
+# `cargo deb -p azalea-webd` — see packaging/debian/.
+[package.metadata.deb]
+name = "azalea"
+maintainer = "Nightshade Systems <hello@nightshade.systems>"
+copyright = "Nightshade Systems"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+Web management UI for VyOS. Serves a static UI and a JSON API from one
+Rust daemon on port 8443; signs in with VyOS local users."""
+section = "net"
+priority = "optional"
+depends = ""
+maintainer-scripts = "../../packaging/debian"
+assets = [
+    ["target/release/azalea-webd", "usr/sbin/", "755"],
+    ["../../web/out/**/*", "usr/share/azalea/web/", "644"],
+    ["../../packaging/debian/azalea-reinstall.sh", "usr/share/azalea/", "755"],
+    ["../../README.md", "usr/share/doc/azalea/README", "644"],
+]
+
+[package.metadata.deb.systemd-units]
+unit-scripts = "../../packaging/debian"
+unit-name = "azalea-webd"
+enable = true
+start = true
+restart-after-upgrade = true

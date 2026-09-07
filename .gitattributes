@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.png binary
+*.deb binary
+src/azalea-vyos/fixtures/** text eol=lf

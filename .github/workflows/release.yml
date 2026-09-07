@@ -1,0 +1,93 @@
+name: Release
+
+# Tag `vX.Y.Z` → amd64 + arm64 .deb, minisign signatures, GitHub Release.
+# Needs the MINISIGN_SECRET_KEY repository secret (the key whose public
+# half is pinned in packaging/install.sh).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci --no-audit --no-fund && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-out
+          path: web/out
+          if-no-files-found: error
+
+  deb:
+    needs: web
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - arch: arm64
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-out
+          path: web/out
+      - run: rustup show
+      - run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-deb --locked
+      - name: Check tag matches Cargo version
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "::error::tag ${GITHUB_REF_NAME} != Cargo version $v"; exit 1; }
+      - run: cargo deb -p azalea-webd --target ${{ matrix.target }} --output packaging/out/
+      - run: ls -la packaging/out && dpkg-deb --info packaging/out/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+          path: packaging/out/*.deb
+          if-no-files-found: error
+
+  release:
+    needs: deb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          path: dist
+          merge-multiple: true
+      - name: Sign with minisign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          [ -n "$MINISIGN_SECRET_KEY" ] || { echo "::error::MINISIGN_SECRET_KEY secret is not set"; exit 1; }
+          sudo apt-get update && sudo apt-get install -y minisign
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > minisign.key
+          for f in dist/*.deb; do
+            minisign -S -s minisign.key -m "$f" -t "azalea ${GITHUB_REF_NAME}" < /dev/null
+          done
+          rm -f minisign.key
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.deb
+            dist/*.minisig
+          generate_release_notes: true

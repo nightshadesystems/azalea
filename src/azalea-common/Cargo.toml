@@ -1,0 +1,32 @@
+[package]
+name = "azalea-common"
+description = "Shared types, settings loader, and helpers for Azalea"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+# /etc/shadow verification: yescrypt is Debian's default, sha-crypt
+# covers $6$/$5$. Both pure Rust.
+sha-crypt = { version = "0.6", features = ["getrandom"] }
+yescrypt = "0.1"
+
+# Self-signed TLS material and its SHA-256 fingerprint.
+rcgen = "0.14"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

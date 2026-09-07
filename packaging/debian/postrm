@@ -1,0 +1,18 @@
+#!/bin/sh
+# azalea postrm: on purge, drop the persisted state and the reinstall hook
+# so the next boot does not bring the package back.
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /config/azalea
+        HOOK=/config/scripts/vyos-postconfig-bootup.script
+        if [ -f "$HOOK" ]; then
+            sed -i '/^# BEGIN azalea$/,/^# END azalea$/d' "$HOOK"
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

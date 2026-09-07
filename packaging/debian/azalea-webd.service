@@ -1,0 +1,17 @@
+[Unit]
+Description=Azalea web UI for VyOS
+Documentation=https://github.com/nightshadesystems/azalea
+After=network-online.target vyos-router.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+# State (azalea.toml, tls/) lives under /config: the only path that
+# survives an image upgrade.
+ExecStart=/usr/sbin/azalea-webd --state-dir /config/azalea
+Restart=on-failure
+RestartSec=5
+Environment=AZALEA_LOG=info
+
+[Install]
+WantedBy=multi-user.target

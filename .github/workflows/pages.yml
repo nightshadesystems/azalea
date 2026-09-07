@@ -1,0 +1,40 @@
+name: Pages
+
+# Publishes packaging/install.sh (and a minimal index) to GitHub Pages so
+# the one-liner is `curl -fsSL https://nightshadesystems.github.io/azalea/install.sh | sudo bash`.
+on:
+  push:
+    branches: [main]
+    paths:
+      - packaging/install.sh
+      - docs/pages/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p site
+          cp packaging/install.sh site/install.sh
+          cp -r docs/pages/. site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

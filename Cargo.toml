@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "src/azalea-common",
+    "src/azalea-vyos",
+    "src/azalea-webd",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/nightshadesystems/azalea"
+authors = ["Nightshade Systems"]
+rust-version = "1.85"
+
+[workspace.dependencies]
+azalea-common = { path = "src/azalea-common" }
+azalea-vyos = { path = "src/azalea-vyos" }
+
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+clap = { version = "4", features = ["derive"] }
+
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

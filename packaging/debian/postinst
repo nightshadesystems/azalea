@@ -1,0 +1,19 @@
+#!/bin/sh
+# azalea postinst: state directory, then the systemd snippets cargo-deb
+# splices in below (enable + start azalea-webd).
+set -e
+
+STATE=/config/azalea
+
+case "$1" in
+    configure)
+        if [ -d /config ]; then
+            mkdir -p "$STATE"
+            chmod 750 "$STATE"
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

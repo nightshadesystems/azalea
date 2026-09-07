@@ -1,0 +1,7 @@
+#!/bin/sh
+# azalea prerm: the systemd snippets stop and disable azalea-webd.
+set -e
+
+#DEBHELPER#
+
+exit 0
