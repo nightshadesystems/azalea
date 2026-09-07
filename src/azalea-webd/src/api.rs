@@ -13,7 +13,7 @@ use axum::routing::{get, post, MethodRouter};
 use axum::{Json, Router};
 use azalea_common::types::{
     ConfigApplied, InterfaceConfig, InterfaceConfigChange, InterfaceKind, InterfaceSummary,
-    StreamFrame,
+    ScopeConfig, ScopeConfigChange, StreamFrame,
 };
 use azalea_vyos::{ConfigBackend, ConfigBatch, ConfigError, OpBackend, OpError};
 use serde::Deserialize;
@@ -48,6 +48,7 @@ fn get_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
         ("/api/interfaces", get(interfaces)),
         ("/api/interfaces/{name}", get(interface_detail)),
         ("/api/config/interfaces/{name}", get(interface_config)),
+        ("/api/config/nat/{scope}", get(nat_config)),
         ("/api/stream", get(stream)),
     ]
 }
@@ -59,6 +60,7 @@ fn post_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
         ("/api/login", post(login)),
         ("/api/logout", post(logout)),
         ("/api/config/interfaces", post(interface_config_change)),
+        ("/api/config/nat", post(nat_config_change)),
     ]
 }
 
@@ -340,21 +342,33 @@ const MAX_WORD_LEN: usize = 256;
 /// VLAN, `delete` removes one.
 fn scoped_batch(change: &InterfaceConfigChange) -> Result<ConfigBatch, ApiError> {
     let base = editable_path(&change.interface)?;
-    if change.set.len() + change.delete.len() > MAX_CHANGES {
+    batch_under(&base, &change.set, &change.delete, true)
+}
+
+/// Prefix relative set/delete paths with `base`, refusing anything
+/// webd should not pass on. `allow_bare` lets a request name the base
+/// node itself (create or delete an interface).
+fn batch_under(
+    base: &[String],
+    set: &[Vec<String>],
+    delete: &[Vec<String>],
+    allow_bare: bool,
+) -> Result<ConfigBatch, ApiError> {
+    if set.len() + delete.len() > MAX_CHANGES {
         return Err(ApiError::BadRequest(format!(
             "too many changes in one request (max {MAX_CHANGES})"
         )));
     }
-    if change.set.is_empty() && change.delete.is_empty() {
+    if set.is_empty() && delete.is_empty() {
         return Err(ApiError::BadRequest("nothing to change".into()));
     }
     let scope = |paths: &[Vec<String>]| -> Result<Vec<Vec<String>>, ApiError> {
         paths
             .iter()
             .map(|rel| {
-                if rel.len() > MAX_PATH_WORDS {
+                if rel.len() > MAX_PATH_WORDS || (rel.is_empty() && !allow_bare) {
                     return Err(ApiError::BadRequest(format!(
-                        "bad config path (at most {MAX_PATH_WORDS} words): {rel:?}"
+                        "bad config path (1 to {MAX_PATH_WORDS} words): {rel:?}"
                     )));
                 }
                 for word in rel {
@@ -370,9 +384,58 @@ fn scoped_batch(change: &InterfaceConfigChange) -> Result<ConfigBatch, ApiError>
             .collect()
     };
     Ok(ConfigBatch {
-        set: scope(&change.set)?,
-        delete: scope(&change.delete)?,
+        set: scope(set)?,
+        delete: scope(delete)?,
     })
+}
+
+/// The NAT subtrees the UI edits, by page.
+fn nat_scope_path(scope: &str) -> Result<Vec<String>, ApiError> {
+    let words: &[&str] = match scope {
+        "nat44" => &["nat"],
+        "nat64" => &["nat64"],
+        "nat66" => &["nat66"],
+        "cgnat" => &["nat", "cgnat"],
+        _ => {
+            return Err(ApiError::BadRequest(format!(
+                "{scope}: not a NAT scope (nat44, nat64, nat66, cgnat)"
+            )))
+        }
+    };
+    Ok(words.iter().map(|w| w.to_string()).collect())
+}
+
+async fn nat_config(
+    _op: Operator,
+    State(state): State<SharedState>,
+    Path(scope): Path<String>,
+) -> Result<Response, ApiError> {
+    let path = nat_scope_path(&scope)?;
+    let config = state.config.subtree(&path).await?;
+    Ok(Json(ScopeConfig {
+        scope,
+        path,
+        config,
+    })
+    .into_response())
+}
+
+async fn nat_config_change(
+    op: Operator,
+    State(state): State<SharedState>,
+    Json(change): Json<ScopeConfigChange>,
+) -> Result<Response, ApiError> {
+    let base = nat_scope_path(&change.scope)?;
+    let batch = batch_under(&base, &change.set, &change.delete, false)?;
+    tracing::info!(
+        username = %op.0.username,
+        scope = %change.scope,
+        set = batch.set.len(),
+        delete = batch.delete.len(),
+        "config change"
+    );
+    let output = state.config.apply(&batch).await?;
+    Ok(Json(ConfigApplied { output }).into_response())
 }
 
 async fn interface_config_change(
@@ -545,6 +608,28 @@ mod tests {
                 ..Default::default()
             }),
             Err(ApiError::Op(OpError::NoSuchInterface(_)))
+        ));
+    }
+
+    #[test]
+    fn nat_scopes_are_prefixed() {
+        let w = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let base = nat_scope_path("cgnat").unwrap();
+        let batch = batch_under(
+            &base,
+            &[w("rule 10 source pool lan")],
+            &[w("log-allocation")],
+            false,
+        )
+        .unwrap();
+        assert_eq!(batch.set[0].join(" "), "nat cgnat rule 10 source pool lan");
+        assert_eq!(batch.delete[0].join(" "), "nat cgnat log-allocation");
+        assert_eq!(nat_scope_path("nat44").unwrap(), w("nat"));
+        assert!(nat_scope_path("nat").is_err());
+        // The scope node itself is off limits.
+        assert!(matches!(
+            batch_under(&base, &[], &[vec![]], false),
+            Err(ApiError::BadRequest(_))
         ));
     }
 

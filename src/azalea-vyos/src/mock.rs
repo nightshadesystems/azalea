@@ -26,22 +26,14 @@ fn schema() -> &'static Value {
     SCHEMA.get_or_init(|| serde_json::from_str(SCHEMA_JSON).expect("generated schema parses"))
 }
 
-/// What `set <path>` means under `interfaces`, per the schema: the leaf
-/// kind of the last word, or why VyOS would refuse the path.
+/// What `set <path>` means, per the schema: the leaf kind of the last
+/// word, or why VyOS would refuse the path. `path` is the full config
+/// path (`interfaces ethernet eth0 mtu 1500`, `nat source rule 10 …`).
 pub fn classify(path: &[String]) -> Result<tree::Leaf, String> {
-    let bad = || {
-        format!(
-            "Configuration path: [interfaces {}] is not valid",
-            path.join(" ")
-        )
-    };
-    let (kind, rest) = path.split_first().ok_or_else(bad)?;
-    let mut node = schema()["types"].get(kind).ok_or_else(bad)?;
-    // The interface name is the type's tag key.
-    let mut words = rest.iter();
-    if words.next().is_none() {
-        return Err(bad());
-    }
+    let bad = || format!("Configuration path: [{}] is not valid", path.join(" "));
+    let mut words = path.iter();
+    let root = words.next().ok_or_else(bad)?;
+    let mut node = schema()["roots"].get(root).ok_or_else(bad)?;
     let mut leaf = tree::Leaf::Node;
     while let Some(word) = words.next() {
         let child = node.get("c").and_then(|c| c.get(word)).ok_or_else(bad)?;
@@ -51,7 +43,7 @@ pub fn classify(path: &[String]) -> Result<tree::Leaf, String> {
                 // Tag: the next word is the key; nothing else changes.
                 if words.next().is_none() {
                     return Err(format!(
-                        "Configuration path: [interfaces {}] requires a value",
+                        "Configuration path: [{}] requires a value",
                         path.join(" ")
                     ));
                 }
@@ -66,7 +58,7 @@ pub fn classify(path: &[String]) -> Result<tree::Leaf, String> {
                 }
                 if words.next().is_none() {
                     return Err(format!(
-                        "Configuration path: [interfaces {}] requires a value",
+                        "Configuration path: [{}] requires a value",
                         path.join(" ")
                     ));
                 }
@@ -114,7 +106,8 @@ fn check_against_schema(node: &Value, cfg: &Value, at: &str) -> Result<(), Strin
 
 pub struct MockOp {
     started: Instant,
-    /// The `interfaces` subtree, in VyOS's JSON rendering.
+    /// The whole config tree Azalea edits (`interfaces`, `nat`, `nat64`,
+    /// `nat66`), in VyOS's JSON rendering.
     config: Mutex<Value>,
 }
 
@@ -151,8 +144,40 @@ impl MockOp {
         }
     }
 
-    /// `interfaces { ... }` for the mock router: one of everything.
+    /// The mock router's config: one of every interface, and a little NAT.
     fn initial_config() -> Value {
+        json!({
+            "interfaces": Self::initial_interfaces(),
+            "nat": {
+                "source": { "rule": { "100": {
+                    "description": "Masquerade LAN", "outbound-interface": { "name": "eth0" },
+                    "source": { "address": "192.168.1.0/24" }, "translation": { "address": "masquerade" }
+                } } },
+                "destination": { "rule": { "10": {
+                    "description": "Web server", "inbound-interface": { "name": "eth0" }, "protocol": "tcp",
+                    "destination": { "port": "80,443" }, "translation": { "address": "192.168.1.10" }
+                } } },
+                "cgnat": {
+                    "pool": {
+                        "external": { "ext-pool": { "external-port-range": "1024-65535", "range": { "203.0.113.128/25": { "seq": "1" } } } },
+                        "internal": { "lan": { "range": "100.64.0.0/22" } }
+                    },
+                    "rule": { "10": { "source": { "pool": "lan" }, "translation": { "pool": "ext-pool" } } }
+                }
+            },
+            "nat64": { "source": { "rule": { "1": {
+                "description": "IPv6-only clients", "source": { "prefix": "64:ff9b::/96" },
+                "translation": { "pool": { "10": { "address": "203.0.113.10", "port": "1-65535" } } }
+            } } } },
+            "nat66": { "source": { "rule": { "1": {
+                "description": "NPTv6 to ISP prefix", "outbound-interface": { "name": "eth0" },
+                "source": { "prefix": "fc00:1::/64" }, "translation": { "address": "2001:db8:1::/64" }
+            } } } }
+        })
+    }
+
+    /// `interfaces { ... }`: one of everything.
+    fn initial_interfaces() -> Value {
         json!({
             "bonding": {
                 "bond0": {
@@ -381,7 +406,7 @@ impl MockOp {
     /// Every configured interface, in the UI's kind order, with VIFs
     /// (`vif`, `vif-s`/`vif-c`) after their parent.
     fn table(&self) -> Vec<Interface> {
-        let config = self.config().clone();
+        let config = self.config()["interfaces"].clone();
         let mut rows = Vec::new();
         for kind in InterfaceKind::CONFIGURABLE {
             let Some(Value::Object(ifaces)) = config.get(kind.as_str()) else {
@@ -528,10 +553,7 @@ impl OpBackend for MockOp {
 #[async_trait::async_trait]
 impl ConfigBackend for MockOp {
     async fn subtree(&self, path: &[String]) -> Result<Value, ConfigError> {
-        if path.first().map(String::as_str) != Some("interfaces") {
-            return Ok(json!({}));
-        }
-        Ok(tree::get(&self.config(), &path[1..])
+        Ok(tree::get(&self.config(), path)
             .cloned()
             .unwrap_or_else(|| json!({})))
     }
@@ -541,43 +563,36 @@ impl ConfigBackend for MockOp {
     /// (MTU range, address syntax) is imitated so a bad edit is refused
     /// the way a commit would refuse it.
     async fn apply(&self, batch: &ConfigBatch) -> Result<String, ConfigError> {
-        let strip = |p: &Vec<String>| -> Result<Vec<String>, ConfigError> {
-            match p.first().map(String::as_str) {
-                Some("interfaces") if p.len() > 1 => Ok(p[1..].to_vec()),
-                _ => Err(ConfigError::Rejected(format!(
-                    "Configuration path: [{}] is not valid",
-                    p.join(" ")
-                ))),
-            }
-        };
         let mut sets = Vec::new();
         for p in &batch.set {
             validate_mock(p)?;
-            let rel = strip(p)?;
-            let leaf = classify(&rel).map_err(ConfigError::Rejected)?;
+            let leaf = classify(p).map_err(ConfigError::Rejected)?;
             // `set interfaces ethernet eth9 vif 1` commits fine on VyOS
             // until the device is looked up; the mock knows now.
-            if rel.len() >= 4 && rel[2] == "vif" && tree::get(&self.config(), &rel[..2]).is_none() {
+            if p.len() >= 5
+                && p[0] == "interfaces"
+                && p[3] == "vif"
+                && tree::get(&self.config(), &p[..3]).is_none()
+            {
                 return Err(ConfigError::Rejected(format!(
                     "Interface \"{}\" does not exist!\n\nCommit failed",
-                    rel[1]
+                    p[2]
                 )));
             }
-            sets.push((rel, leaf));
+            sets.push((p.clone(), leaf));
         }
         let mut config = self.config().clone();
         for p in &batch.delete {
-            let rel = strip(p)?;
-            if rel.len() < 2 {
+            if p.len() < 2 || schema()["roots"].get(&p[0]).is_none() {
                 return Err(ConfigError::Rejected(format!(
                     "Configuration path: [{}] is not valid",
                     p.join(" ")
                 )));
             }
-            tree::delete(&mut config, &rel);
+            tree::delete(&mut config, p);
         }
-        for (rel, leaf) in sets {
-            tree::set(&mut config, &rel, leaf);
+        for (p, leaf) in sets {
+            tree::set(&mut config, &p, leaf);
         }
         *self.config() = config;
         Ok(String::new())
@@ -638,12 +653,10 @@ mod tests {
     #[test]
     fn sample_config_matches_the_schema() {
         let cfg = MockOp::initial_config();
-        for (kind, ifaces) in cfg.as_object().unwrap() {
-            let node = &schema()["types"][kind];
-            assert!(!node.is_null(), "{kind}: no schema");
-            for (name, icfg) in ifaces.as_object().unwrap() {
-                check_against_schema(node, icfg, &format!("{kind} {name}")).unwrap();
-            }
+        for (root, subtree) in cfg.as_object().unwrap() {
+            let node = &schema()["roots"][root];
+            assert!(!node.is_null(), "{root}: no schema");
+            check_against_schema(node, subtree, root).unwrap();
         }
         // One row per configurable kind, at least.
         let names: Vec<String> = MockOp::new().table().into_iter().map(|i| i.name).collect();
@@ -660,40 +673,95 @@ mod tests {
     #[test]
     fn paths_are_classified_by_the_schema() {
         let c = |p: &str| classify(&word(p));
+        let single = tree::Leaf::Single;
+        let multi = tree::Leaf::Multi;
+        let node = tree::Leaf::Node;
         assert_eq!(
-            c("ethernet eth0 description WAN").unwrap(),
-            tree::Leaf::Single
+            c("interfaces ethernet eth0 description WAN").unwrap(),
+            single
         );
         assert_eq!(
-            c("ethernet eth0 address 10.0.0.1/24").unwrap(),
-            tree::Leaf::Multi
+            c("interfaces ethernet eth0 address 10.0.0.1/24").unwrap(),
+            multi
         );
-        assert_eq!(c("ethernet eth0 disable").unwrap(), tree::Leaf::Node);
-        assert_eq!(c("ethernet eth0 offload gro").unwrap(), tree::Leaf::Node);
-        assert_eq!(c("ethernet eth0 vif 100").unwrap(), tree::Leaf::Node);
+        assert_eq!(c("interfaces ethernet eth0 disable").unwrap(), node);
+        assert_eq!(c("interfaces ethernet eth0 offload gro").unwrap(), node);
+        assert_eq!(c("interfaces ethernet eth0 vif 100").unwrap(), node);
         assert_eq!(
-            c("ethernet eth0 vif 100 address 10.0.0.1/24").unwrap(),
-            tree::Leaf::Multi
+            c("interfaces ethernet eth0 vif 100 address 10.0.0.1/24").unwrap(),
+            multi
         );
-        assert_eq!(c("wireguard wg0 peer hq").unwrap(), tree::Leaf::Node);
+        assert_eq!(c("interfaces wireguard wg0 peer hq").unwrap(), node);
         assert_eq!(
-            c("wireguard wg0 peer hq allowed-ips 0.0.0.0/0").unwrap(),
-            tree::Leaf::Multi
-        );
-        assert_eq!(
-            c("bridge br0 member interface eth2 cost 5").unwrap(),
-            tree::Leaf::Single
+            c("interfaces wireguard wg0 peer hq allowed-ips 0.0.0.0/0").unwrap(),
+            multi
         );
         assert_eq!(
-            c("bonding bond0 member interface eth2").unwrap(),
-            tree::Leaf::Multi
+            c("interfaces bridge br0 member interface eth2 cost 5").unwrap(),
+            single
         );
-        assert_eq!(c("wireguard wg0").unwrap(), tree::Leaf::Node);
-        assert!(c("ethernet eth0 nonsense x").is_err());
-        assert!(c("ethernet eth0 description").is_err());
-        assert!(c("ethernet eth0 disable yes").is_err());
-        assert!(c("ethernet eth0 mtu 1500 extra").is_err());
-        assert!(c("gre gre0 remote x").is_err());
+        assert_eq!(
+            c("interfaces bonding bond0 member interface eth2").unwrap(),
+            multi
+        );
+        assert_eq!(c("interfaces wireguard wg0").unwrap(), node);
+        assert_eq!(c("nat source rule 10").unwrap(), node);
+        assert_eq!(
+            c("nat source rule 10 translation address masquerade").unwrap(),
+            single
+        );
+        assert_eq!(c("nat cgnat rule 10 source pool lan").unwrap(), single);
+        assert_eq!(
+            c("nat64 source rule 1 translation pool 10 address 1.2.3.4").unwrap(),
+            single
+        );
+        assert_eq!(c("nat66 destination rule 1 log").unwrap(), node);
+        assert!(c("interfaces ethernet eth0 nonsense x").is_err());
+        assert!(c("interfaces ethernet eth0 description").is_err());
+        assert!(c("interfaces ethernet eth0 disable yes").is_err());
+        assert!(c("interfaces ethernet eth0 mtu 1500 extra").is_err());
+        assert!(c("interfaces gre gre0 remote x").is_err());
+        assert!(c("system host-name x").is_err());
+    }
+
+    #[tokio::test]
+    async fn nat_edits_round_trip() {
+        let m = MockOp::new();
+        let nat = m.subtree(&word("nat")).await.unwrap();
+        assert_eq!(
+            nat["source"]["rule"]["100"]["translation"]["address"],
+            "masquerade"
+        );
+        m.apply(&ConfigBatch {
+            set: vec![
+                word("nat source rule 200"),
+                word("nat source rule 200 outbound-interface name eth1"),
+                word("nat source rule 200 translation address masquerade"),
+                word("nat cgnat log-allocation"),
+            ],
+            delete: vec![word("nat destination rule 10")],
+        })
+        .await
+        .unwrap();
+        let nat = m.subtree(&word("nat")).await.unwrap();
+        assert_eq!(
+            nat["source"]["rule"]["200"]["outbound-interface"]["name"],
+            "eth1"
+        );
+        assert!(nat["destination"]["rule"].get("10").is_none());
+        assert_eq!(nat["cgnat"]["log-allocation"], json!({}));
+        assert_eq!(
+            m.subtree(&word("nat cgnat")).await.unwrap()["rule"]["10"]["source"]["pool"],
+            "lan"
+        );
+        assert!(matches!(
+            m.apply(&ConfigBatch {
+                set: vec![],
+                delete: vec![word("nat")]
+            })
+            .await,
+            Err(ConfigError::Rejected(_))
+        ));
     }
 
     #[tokio::test]

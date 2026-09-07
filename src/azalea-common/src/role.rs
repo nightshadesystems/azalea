@@ -39,7 +39,7 @@ impl std::fmt::Display for Role {
 
 /// webd API paths an operator may not POST to; webd's router test
 /// walks its POST routes against it.
-pub const ADMIN_WEB_PATHS: &[&str] = &["/api/config/interfaces"];
+pub const ADMIN_WEB_PATHS: &[&str] = &["/api/config/interfaces", "/api/config/nat"];
 
 pub fn web_requires_admin(path: &str) -> bool {
     ADMIN_WEB_PATHS.contains(&path)

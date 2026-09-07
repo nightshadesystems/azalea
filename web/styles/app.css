@@ -83,3 +83,7 @@
 .detail-toggle button{all:unset;cursor:pointer;padding:0 10px;height:24px;font-size:12px;line-height:24px;color:var(--ns-ink-9)}
 .detail-toggle button:hover{color:var(--ns-ink-11);background:rgba(242,243,245,0.08)}
 .detail-toggle button.active{background:var(--cds-alias-interaction-action);color:var(--cds-alias-interaction-on-action);font-weight:600}
+/* NAT pages: the editor lives in a card instead of a modal */
+.cfg-page{padding:16px 20px}
+.cfg-page .cfg-layout{min-height:360px}
+.page-header .label{margin-right:4px}

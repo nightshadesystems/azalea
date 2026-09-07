@@ -17,10 +17,20 @@ interface Tab extends NavItem {
 const TABS: Tab[] = [
   { label: 'Dashboard', href: '/dashboard/' },
   { label: 'Interfaces', href: '/interfaces/bonding/', root: '/interfaces' },
+  { label: 'NAT', href: '/nat/nat44/', root: '/nat' },
 ];
 
 // Left-hand navigation per tab.
 const SIDE_NAV: Record<string, VerticalNavGroup> = {
+  '/nat': {
+    label: 'NAT',
+    items: [
+      { id: '/nat/nat44/', label: 'NAT44', icon: 'two-way-arrows' },
+      { id: '/nat/nat64/', label: 'NAT64', icon: 'switch' },
+      { id: '/nat/nat66/', label: 'NAT66', icon: 'network-globe' },
+      { id: '/nat/cgnat/', label: 'CGNAT', icon: 'users' },
+    ],
+  },
   '/interfaces': {
     label: 'Interfaces',
     items: [

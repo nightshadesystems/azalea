@@ -88,14 +88,18 @@ const BASIC: Partial<Record<InterfaceKind, string[]>> = {
   vlan: COMMON,
 };
 
-/** Whether a schema path (names only, no tag keys) is Basic for this kind. */
-export function isBasic(kind: InterfaceKind, path: string[]): boolean {
-  const rules = BASIC[kind] ?? COMMON;
+/** The Basic rules for an interface kind. */
+export const basicRulesFor = (kind: InterfaceKind): string[] => BASIC[kind] ?? COMMON;
+
+/** Whether a schema path (names only, no tag keys) is Basic under these rules. */
+export function isBasic(rules: string[], path: string[]): boolean {
   const key = path.join('.');
   return rules.some((rule) => {
+    if (rule === '*') return true;
     if (rule.endsWith('.*')) {
       const head = rule.slice(0, -2);
-      return key === head || key.startsWith(head + '.');
+      // The subtree, and the ancestors that lead to it.
+      return key === head || key.startsWith(head + '.') || head.startsWith(key + '.');
     }
     // Exact, or an ancestor of something Basic (so the group is reachable).
     return rule === key || rule.startsWith(key + '.');
@@ -103,11 +107,11 @@ export function isBasic(kind: InterfaceKind, path: string[]): boolean {
 }
 
 /** The schema with only Basic children, recursively; the node itself is kept. */
-export function basicSchema(node: SchemaNode, kind: InterfaceKind, path: string[] = []): SchemaNode {
+export function basicSchema(node: SchemaNode, rules: string[], path: string[] = []): SchemaNode {
   if (!node.children) return node;
   const children = node.children
-    .filter((c) => isBasic(kind, [...path, c.name]))
-    .map((c) => (c.kind === 'leaf' ? c : basicSchema(c, kind, [...path, c.name])));
+    .filter((c) => isBasic(rules, [...path, c.name]))
+    .map((c) => (c.kind === 'leaf' ? c : basicSchema(c, rules, [...path, c.name])));
   return { ...node, children };
 }
 

@@ -318,6 +318,26 @@ pub struct InterfaceConfigChange {
     pub delete: Vec<Vec<String>>,
 }
 
+/// `GET /api/config/nat/<scope>` — one NAT subtree (`nat`, `nat64`,
+/// `nat66` or `nat cgnat`) in VyOS's JSON rendering.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeConfig {
+    pub scope: String,
+    pub path: Vec<String>,
+    pub config: serde_json::Value,
+}
+
+/// `POST /api/config/nat` — set/delete paths relative to the scope's
+/// node; webd prefixes the path, so only that subtree is reachable.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeConfigChange {
+    pub scope: String,
+    #[serde(default)]
+    pub set: Vec<Vec<String>>,
+    #[serde(default)]
+    pub delete: Vec<Vec<String>>,
+}
+
 /// What a successful commit + save printed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigApplied {

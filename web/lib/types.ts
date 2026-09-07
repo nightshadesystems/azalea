@@ -170,6 +170,20 @@ export interface InterfaceConfigChange {
   delete: string[][];
 }
 
+/** GET /api/config/nat/<scope> */
+export interface ScopeConfig {
+  scope: string;
+  path: string[];
+  config: CfgNode;
+}
+
+/** POST /api/config/nat — paths relative to the scope's node. */
+export interface ScopeConfigChange {
+  scope: string;
+  set: string[][];
+  delete: string[][];
+}
+
 /** What commit and save printed. */
 export interface ConfigApplied {
   output: string;
