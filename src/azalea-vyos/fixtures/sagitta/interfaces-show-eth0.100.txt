@@ -1,0 +1,11 @@
+eth0.100@eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 92:7f:f3:cc:e7:13 brd ff:ff:ff:ff:ff:ff
+    inet 192.0.2.1/24 scope global eth0.100
+       valid_lft forever preferred_lft forever
+    inet6 fe80::907f:f3ff:fecc:e713/64 scope link 
+       valid_lft forever preferred_lft forever
+
+    RX:  bytes  packets  errors  dropped  overrun       mcast
+           488        7       0        0        0           7
+    TX:  bytes  packets  errors  dropped  carrier  collisions
+           586        7       0        0        0           0

@@ -1,0 +1,10 @@
+eth0@if27: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 92:7f:f3:cc:e7:13 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+    Description: uplink to lab
+
+    RX:      bytes  packets  errors  dropped  overrun       mcast
+         559714704   391880       0        0        0           0
+    TX:      bytes  packets  errors  dropped  carrier  collisions
+          28693022   383139       0        0        0           0

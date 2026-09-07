@@ -25,3 +25,13 @@ Notes the parsers rely on:
   `avail`, `use_percentage` (a string). Rolling prints a plain sentence
   when there is none — non-JSON means "no disks".
 - `memory.py` values are bytes; `free` is `MemAvailable`.
+- `interfaces.py show --raw` is `ip -json addr show` per interface plus
+  `description`, `counters_last_clear` and `stats`. The captures ran in
+  a container with a dummy, a VLAN (`eth0.100`) and a bridge enslaving
+  the dummy, so `link`, `master` and both `UP`/`UNKNOWN` operstates are
+  exercised. `interfaces-show-<name>.txt` is the same script without
+  `--raw`, which is exactly what `show interfaces <type> <name>` prints.
+- `linux/ip-json-s-link.json` is `ip -json -s link show`: the counter
+  stream reads this instead of `show_counters --raw` (a Python start-up
+  per tick), so it reports kernel counters that `clear interfaces
+  counters` does not offset.

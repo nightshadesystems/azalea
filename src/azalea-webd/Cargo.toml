@@ -21,7 +21,8 @@ serde_json = { workspace = true }
 
 # HTTP server (pure Rust: axum/hyper + rustls). The ring crypto provider
 # is selected explicitly — the aws-lc default needs cmake/nasm to build.
-axum = "0.8"
+# `ws` for /api/stream (live interface counters).
+axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tower-http = { version = "0.6", features = ["fs"] }

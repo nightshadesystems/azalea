@@ -1,12 +1,6 @@
 'use client';
-import Shell from '@/components/Shell';
+import { InterfacesGrid } from '@/components/InterfacesGrid';
 
 export default function Page() {
-  return (
-    <Shell>
-      <div className="page-header">
-        <h2>Tunnels / WireGuard</h2>
-      </div>
-    </Shell>
-  );
+  return <InterfacesGrid title="Tunnels / WireGuard" kinds={['tunnel', 'wireguard']} />;
 }

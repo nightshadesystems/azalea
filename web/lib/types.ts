@@ -120,6 +120,13 @@ export interface CounterSample {
   counters: InterfaceCounters;
 }
 
+/** One /api/stream WebSocket message */
+export interface StreamFrame {
+  /** Unix time, milliseconds. */
+  t: number;
+  samples: CounterSample[];
+}
+
 /** GET /api/interfaces/<name> */
 export interface InterfaceDetail {
   name: string;

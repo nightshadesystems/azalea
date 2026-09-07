@@ -1,0 +1,61 @@
+[
+    {
+        "ifname": "br0",
+        "oper_state": "up",
+        "admin_state": "up",
+        "addr": [],
+        "description": "",
+        "mtu": 1500,
+        "mac": "4e:8e:bc:77:2a:58",
+        "vrf": null
+    },
+    {
+        "ifname": "dum0",
+        "oper_state": "unknown",
+        "admin_state": "up",
+        "addr": [
+            "10.9.9.1/24"
+        ],
+        "description": "",
+        "mtu": 1500,
+        "mac": "4e:8e:bc:77:2a:58",
+        "vrf": null
+    },
+    {
+        "ifname": "eth0",
+        "oper_state": "up",
+        "admin_state": "up",
+        "addr": [
+            "172.17.0.2/16"
+        ],
+        "description": "uplink to lab",
+        "mtu": 1500,
+        "mac": "92:7f:f3:cc:e7:13",
+        "vrf": null
+    },
+    {
+        "ifname": "eth0.100",
+        "oper_state": "up",
+        "admin_state": "up",
+        "addr": [
+            "192.0.2.1/24"
+        ],
+        "description": "",
+        "mtu": 1500,
+        "mac": "92:7f:f3:cc:e7:13",
+        "vrf": null
+    },
+    {
+        "ifname": "lo",
+        "oper_state": "unknown",
+        "admin_state": "up",
+        "addr": [
+            "127.0.0.1/8",
+            "::1/128"
+        ],
+        "description": "",
+        "mtu": 65536,
+        "mac": "00:00:00:00:00:00",
+        "vrf": null
+    }
+]

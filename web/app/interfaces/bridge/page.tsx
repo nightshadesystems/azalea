@@ -1,12 +1,6 @@
 'use client';
-import Shell from '@/components/Shell';
+import { InterfacesGrid } from '@/components/InterfacesGrid';
 
 export default function Page() {
-  return (
-    <Shell>
-      <div className="page-header">
-        <h2>Bridge</h2>
-      </div>
-    </Shell>
-  );
+  return <InterfacesGrid title="Bridge" kinds={['bridge']} />;
 }

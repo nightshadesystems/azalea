@@ -3,7 +3,8 @@
 //!
 //! Uptime and load come from `/proc` rather than `uptime.py`: rolling
 //! dropped `uptime_seconds`, and every train divides the load averages
-//! by the core count. Interface listing lands in M2.
+//! by the core count. The counter stream reads `ip -s link` rather than
+//! spawning Python every tick.
 
 use azalea_common::types::{
     CounterSample, Interface, InterfaceDetail, InterfaceKind, SystemInfo, SystemStatus,
@@ -84,13 +85,6 @@ async fn proc_file(path: &str) -> Result<String, OpError> {
         })
 }
 
-fn not_yet(command: &str, milestone: &str) -> OpError {
-    OpError::Parse {
-        command: command.into(),
-        reason: format!("not implemented until {milestone}"),
-    }
-}
-
 #[async_trait::async_trait]
 impl OpBackend for VyosOp {
     async fn system_info(&self) -> Result<SystemInfo, OpError> {
@@ -132,16 +126,34 @@ impl OpBackend for VyosOp {
     }
 
     async fn interfaces(&self) -> Result<Vec<Interface>, OpError> {
-        Err(not_yet("interfaces.py show", "M2"))
+        let v = Self::raw("interfaces.py", "show", &[]).await?;
+        parse::interfaces_raw(&v).map_err(|e| parse_err("interfaces.py show", e))
     }
 
+    /// `ip -json -s link show`: one spawn, every interface, kernel
+    /// counters. Cheap enough to run every couple of seconds, which
+    /// `interfaces.py show_counters` (a Python start-up per tick) is not.
     async fn interface_counters(&self) -> Result<Vec<CounterSample>, OpError> {
-        Err(not_yet("interfaces.py show_counters", "M2"))
+        let text = run("ip", &["-json", "-s", "link", "show"]).await?;
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| OpError::Parse {
+            command: "ip -json -s link show".into(),
+            reason: e.to_string(),
+        })?;
+        parse::ip_link_stats(&v).map_err(|e| parse_err("ip -json -s link show", e))
     }
 
+    /// The text `show interfaces <type> <name>` prints; `interfaces.py`
+    /// filters by name alone, so the type need not be spelled the VyOS way.
     async fn interface_detail(&self, name: &str) -> Result<InterfaceDetail, OpError> {
         let kind = InterfaceKind::from_name(name);
-        let raw = Self::wrapper(&["show", "interfaces", kind.as_str(), name]).await?;
+        let raw = run(
+            &format!("{OP_MODE_DIR}/interfaces.py"),
+            &["show", "--intf-name", name],
+        )
+        .await?;
+        if raw.trim().is_empty() {
+            return Err(OpError::NoSuchInterface(name.to_string()));
+        }
         Ok(InterfaceDetail {
             name: name.to_string(),
             kind,

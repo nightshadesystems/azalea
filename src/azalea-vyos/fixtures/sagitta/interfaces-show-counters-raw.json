@@ -1,0 +1,57 @@
+[
+    {
+        "ifname": "br0",
+        "rx_packets": 0,
+        "rx_bytes": 0,
+        "tx_packets": 8,
+        "tx_bytes": 704,
+        "rx_dropped": 0,
+        "tx_dropped": 0,
+        "rx_over_errors": 0,
+        "tx_carrier_errors": 0
+    },
+    {
+        "ifname": "dum0",
+        "rx_packets": 0,
+        "rx_bytes": 0,
+        "tx_packets": 9,
+        "tx_bytes": 774,
+        "rx_dropped": 0,
+        "tx_dropped": 0,
+        "rx_over_errors": 0,
+        "tx_carrier_errors": 0
+    },
+    {
+        "ifname": "eth0",
+        "rx_packets": 391880,
+        "rx_bytes": 559714704,
+        "tx_packets": 383139,
+        "tx_bytes": 28693022,
+        "rx_dropped": 0,
+        "tx_dropped": 0,
+        "rx_over_errors": 0,
+        "tx_carrier_errors": 0
+    },
+    {
+        "ifname": "eth0.100",
+        "rx_packets": 6,
+        "rx_bytes": 432,
+        "tx_packets": 6,
+        "tx_bytes": 516,
+        "rx_dropped": 0,
+        "tx_dropped": 0,
+        "rx_over_errors": 0,
+        "tx_carrier_errors": 0
+    },
+    {
+        "ifname": "lo",
+        "rx_packets": 0,
+        "rx_bytes": 0,
+        "tx_packets": 0,
+        "tx_bytes": 0,
+        "rx_dropped": 0,
+        "tx_dropped": 0,
+        "rx_over_errors": 0,
+        "tx_carrier_errors": 0
+    }
+]

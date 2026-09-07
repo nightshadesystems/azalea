@@ -4,12 +4,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::{header, request::Parts, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, MethodRouter};
 use axum::{Json, Router};
-use azalea_common::types::InterfaceSummary;
+use azalea_common::types::{InterfaceSummary, StreamFrame};
 use azalea_vyos::{OpBackend, OpError};
 use serde::Deserialize;
 use serde_json::json;
@@ -41,6 +42,7 @@ fn get_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
         ("/api/system/tls", get(system_tls)),
         ("/api/interfaces", get(interfaces)),
         ("/api/interfaces/{name}", get(interface_detail)),
+        ("/api/stream", get(stream)),
     ]
 }
 
@@ -261,6 +263,56 @@ async fn interface_detail(
         return Err(OpError::NoSuchInterface(name).into());
     }
     Ok(Json(state.op.interface_detail(&name).await?).into_response())
+}
+
+// ---------------------------------------------------------------- stream
+
+/// Counter samples every `STREAM_INTERVAL` while the socket is open.
+const STREAM_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// `GET /api/stream` — WebSocket of `StreamFrame`s. The session cookie
+/// rides on the upgrade request, so the `Operator` extractor gates it
+/// like any other read.
+async fn stream(_op: Operator, State(state): State<SharedState>, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| stream_loop(socket, state))
+}
+
+async fn stream_loop(mut socket: WebSocket, state: SharedState) {
+    let mut ticker = tokio::time::interval(STREAM_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {
+                let samples = match state.op.interface_counters().await {
+                    Ok(samples) => samples,
+                    Err(err) => {
+                        tracing::warn!(%err, "counter sample failed; closing stream");
+                        break;
+                    }
+                };
+                let frame = StreamFrame { t: unix_millis(), samples };
+                let Ok(text) = serde_json::to_string(&frame) else { break };
+                if socket.send(Message::Text(text.into())).await.is_err() {
+                    break;
+                }
+            }
+            incoming = socket.recv() => {
+                // The client never sends anything meaningful; None or
+                // Close ends the loop, pings are answered by axum.
+                match incoming {
+                    None | Some(Ok(Message::Close(_))) | Some(Err(_)) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        }
+    }
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Interface names reach an argv; keep them to what VyOS itself allows.

@@ -1,0 +1,253 @@
+[
+    {
+        "ifindex": 5,
+        "ifname": "br0",
+        "flags": [
+            "BROADCAST",
+            "MULTICAST",
+            "UP",
+            "LOWER_UP"
+        ],
+        "mtu": 1500,
+        "qdisc": "noqueue",
+        "operstate": "UP",
+        "group": "default",
+        "txqlen": 1000,
+        "link_type": "ether",
+        "address": "a6:da:2a:e3:72:db",
+        "broadcast": "ff:ff:ff:ff:ff:ff",
+        "addr_info": [
+            {
+                "family": "inet6",
+                "local": "fe80::d05b:beff:feb5:6ba7",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            }
+        ],
+        "counters_last_clear": 0,
+        "description": "",
+        "stats": {
+            "rx_bytes": 0,
+            "rx_packets": 0,
+            "rx_errors": 0,
+            "rx_dropped": 0,
+            "rx_over_errors": 0,
+            "multicast": 0,
+            "tx_bytes": 884,
+            "tx_packets": 10,
+            "tx_errors": 0,
+            "tx_dropped": 0,
+            "tx_carrier_errors": 0,
+            "collisions": 0
+        }
+    },
+    {
+        "ifindex": 3,
+        "ifname": "dum0",
+        "flags": [
+            "BROADCAST",
+            "NOARP",
+            "UP",
+            "LOWER_UP"
+        ],
+        "mtu": 1500,
+        "qdisc": "noqueue",
+        "master": "br0",
+        "operstate": "UNKNOWN",
+        "group": "default",
+        "txqlen": 1000,
+        "link_type": "ether",
+        "address": "a6:da:2a:e3:72:db",
+        "broadcast": "ff:ff:ff:ff:ff:ff",
+        "addr_info": [
+            {
+                "family": "inet",
+                "local": "10.9.9.1",
+                "prefixlen": 24,
+                "scope": "global",
+                "label": "dum0",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            },
+            {
+                "family": "inet6",
+                "local": "fe80::a4da:2aff:fee3:72db",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            }
+        ],
+        "counters_last_clear": 0,
+        "description": "",
+        "stats": {
+            "rx_bytes": 0,
+            "rx_packets": 0,
+            "rx_errors": 0,
+            "rx_dropped": 0,
+            "rx_over_errors": 0,
+            "multicast": 0,
+            "tx_bytes": 1024,
+            "tx_packets": 12,
+            "tx_errors": 0,
+            "tx_dropped": 0,
+            "tx_carrier_errors": 0,
+            "collisions": 0
+        }
+    },
+    {
+        "ifindex": 2,
+        "link_index": 29,
+        "ifname": "eth0",
+        "flags": [
+            "BROADCAST",
+            "MULTICAST",
+            "UP",
+            "LOWER_UP"
+        ],
+        "mtu": 1500,
+        "qdisc": "noqueue",
+        "operstate": "UP",
+        "group": "default",
+        "link_type": "ether",
+        "address": "c6:13:c9:ed:9a:73",
+        "broadcast": "ff:ff:ff:ff:ff:ff",
+        "link_netnsid": 0,
+        "addr_info": [
+            {
+                "family": "inet",
+                "local": "172.17.0.2",
+                "prefixlen": 16,
+                "broadcast": "172.17.255.255",
+                "scope": "global",
+                "label": "eth0",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            }
+        ],
+        "counters_last_clear": 0,
+        "description": "uplink to lab",
+        "stats": {
+            "rx_bytes": 566450483,
+            "rx_packets": 396749,
+            "rx_errors": 0,
+            "rx_dropped": 0,
+            "rx_over_errors": 0,
+            "multicast": 0,
+            "tx_bytes": 29029244,
+            "tx_packets": 388055,
+            "tx_errors": 0,
+            "tx_dropped": 0,
+            "tx_carrier_errors": 0,
+            "collisions": 0
+        }
+    },
+    {
+        "ifindex": 4,
+        "link": "eth0",
+        "ifname": "eth0.100",
+        "flags": [
+            "BROADCAST",
+            "MULTICAST",
+            "UP",
+            "LOWER_UP"
+        ],
+        "mtu": 1500,
+        "qdisc": "noqueue",
+        "operstate": "UP",
+        "group": "default",
+        "txqlen": 1000,
+        "link_type": "ether",
+        "address": "c6:13:c9:ed:9a:73",
+        "broadcast": "ff:ff:ff:ff:ff:ff",
+        "addr_info": [
+            {
+                "family": "inet",
+                "local": "192.0.2.1",
+                "prefixlen": 24,
+                "scope": "global",
+                "label": "eth0.100",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            },
+            {
+                "family": "inet6",
+                "local": "fe80::c413:c9ff:feed:9a73",
+                "prefixlen": 64,
+                "scope": "link",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            }
+        ],
+        "counters_last_clear": 0,
+        "description": "",
+        "stats": {
+            "rx_bytes": 488,
+            "rx_packets": 7,
+            "rx_errors": 0,
+            "rx_dropped": 0,
+            "rx_over_errors": 0,
+            "multicast": 7,
+            "tx_bytes": 586,
+            "tx_packets": 7,
+            "tx_errors": 0,
+            "tx_dropped": 0,
+            "tx_carrier_errors": 0,
+            "collisions": 0
+        }
+    },
+    {
+        "ifindex": 1,
+        "ifname": "lo",
+        "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+        ],
+        "mtu": 65536,
+        "qdisc": "noqueue",
+        "operstate": "UNKNOWN",
+        "group": "default",
+        "txqlen": 1000,
+        "link_type": "loopback",
+        "address": "00:00:00:00:00:00",
+        "broadcast": "00:00:00:00:00:00",
+        "addr_info": [
+            {
+                "family": "inet",
+                "local": "127.0.0.1",
+                "prefixlen": 8,
+                "scope": "host",
+                "label": "lo",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            },
+            {
+                "family": "inet6",
+                "local": "::1",
+                "prefixlen": 128,
+                "scope": "host",
+                "valid_life_time": 4294967295,
+                "preferred_life_time": 4294967295
+            }
+        ],
+        "counters_last_clear": 0,
+        "description": "",
+        "stats": {
+            "rx_bytes": 0,
+            "rx_packets": 0,
+            "rx_errors": 0,
+            "rx_dropped": 0,
+            "rx_over_errors": 0,
+            "multicast": 0,
+            "tx_bytes": 0,
+            "tx_packets": 0,
+            "tx_errors": 0,
+            "tx_dropped": 0,
+            "tx_carrier_errors": 0,
+            "collisions": 0
+        }
+    }
+]

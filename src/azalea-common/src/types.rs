@@ -153,6 +153,14 @@ pub struct CounterSample {
     pub counters: InterfaceCounters,
 }
 
+/// One `/api/stream` WebSocket message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamFrame {
+    /// Unix time, milliseconds.
+    pub t: u64,
+    pub samples: Vec<CounterSample>,
+}
+
 /// `GET /api/interfaces/<name>` — `show interfaces <type> <name>`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceDetail {

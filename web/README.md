@@ -19,4 +19,6 @@ Run the daemon off-box:
         --dev-auth admin:admin --assets web/out --mock
 
 then open http://localhost:8080. For hot reload run `npm run dev`; it
-proxies `/api/*` to port 8080 (override with `AZALEA_WEBD_URL`).
+proxies `/api/*` to port 8080 (override with `AZALEA_WEBD_URL`). Next's
+rewrites do not carry WebSockets, so under `npm run dev` the Interfaces
+pages show "Polling" and refetch every few seconds instead of streaming.
