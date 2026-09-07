@@ -173,11 +173,38 @@ impl MockOp {
         }
     }
 
-    /// The static rows, with description, addresses, MTU, MAC and admin
-    /// state taken from the config tree so edits show up in the grid.
+    /// The static rows plus one per configured `vif`, with description,
+    /// addresses, MTU, MAC and admin state taken from the config tree so
+    /// edits, additions and removals show up in the grid.
     fn table(&self) -> Vec<Interface> {
         let config = self.config().clone();
         let mut rows = self.base_table();
+        let t = self.started.elapsed().as_secs();
+        let mut vlans = Vec::new();
+        for parent in &rows {
+            let Some(path) = InterfaceKind::config_path(&parent.name) else {
+                continue;
+            };
+            let Some(Value::Object(vifs)) =
+                tree::get(&config, &path[1..]).and_then(|n| n.get("vif"))
+            else {
+                continue;
+            };
+            for id in vifs.keys() {
+                let name = format!("{}.{id}", parent.name);
+                let seed: u64 = id.parse().unwrap_or(1);
+                vlans.push(Self::iface(
+                    &name,
+                    true,
+                    parent.oper_up,
+                    "",
+                    &parent.mac,
+                    &[],
+                    seed * 3_000 + t * (seed % 50),
+                ));
+            }
+        }
+        rows.extend(vlans);
         for row in &mut rows {
             let Some(path) = InterfaceKind::config_path(&row.name) else {
                 continue;
@@ -232,24 +259,6 @@ impl MockOp {
                 "52:54:00:a1:b2:02",
                 &["192.168.1.1/24"],
                 5_100_000 + t * 900,
-            ),
-            i(
-                "eth1.100",
-                true,
-                true,
-                "Guest VLAN",
-                "52:54:00:a1:b2:02",
-                &["192.168.100.1/24"],
-                300_000 + t * 40,
-            ),
-            i(
-                "eth1.200",
-                true,
-                false,
-                "IoT VLAN",
-                "52:54:00:a1:b2:02",
-                &["192.168.200.1/24"],
-                12_000,
             ),
             i(
                 "eth2",
@@ -459,6 +468,16 @@ impl ConfigBackend for MockOp {
         };
         for p in &batch.set {
             validate_mock(p)?;
+            // `set interfaces ethernet eth9 vif 1` commits fine on VyOS
+            // until the device is looked up; the mock knows now.
+            if p.len() >= 5 && p[3] == "vif" && tree::get(&self.config(), &p[1..3]).is_none() {
+                return Err(ConfigError::Rejected(format!(
+                    "Interface \"{}\" does not exist!
+
+Commit failed",
+                    p[2]
+                )));
+            }
         }
         let mut config = self.config().clone();
         for p in &batch.delete {
@@ -579,6 +598,33 @@ mod tests {
             delete: vec![],
         };
         assert!(matches!(m.apply(&bad).await, Err(ConfigError::Rejected(_))));
+        // A new VLAN appears; a removed one goes.
+        m.apply(&ConfigBatch {
+            set: vec![
+                word("interfaces ethernet eth2 vif 300"),
+                word("interfaces ethernet eth2 vif 300 description Cameras"),
+            ],
+            delete: vec![word("interfaces ethernet eth1 vif 200")],
+        })
+        .await
+        .unwrap();
+        let names: Vec<String> = m
+            .interfaces()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|i| i.name)
+            .collect();
+        assert!(names.contains(&"eth2.300".to_string()));
+        assert!(!names.contains(&"eth1.200".to_string()));
+        assert!(matches!(
+            m.apply(&ConfigBatch {
+                set: vec![word("interfaces ethernet eth9 vif 1")],
+                delete: vec![],
+            })
+            .await,
+            Err(ConfigError::Rejected(_))
+        ));
         // Unrelated subtrees are refused rather than edited.
         let bad = ConfigBatch {
             set: vec![word("system host-name evil")],

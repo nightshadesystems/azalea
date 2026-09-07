@@ -337,7 +337,9 @@ const MAX_PATH_WORDS: usize = 16;
 const MAX_WORD_LEN: usize = 256;
 
 /// The batch VyOS sees: every relative path prefixed with the
-/// interface's own, so nothing outside that subtree is reachable.
+/// interface's own, so nothing outside that subtree is reachable. An
+/// empty relative path is the interface node itself: `set` creates a
+/// VLAN, `delete` removes one.
 fn scoped_batch(change: &InterfaceConfigChange) -> Result<ConfigBatch, ApiError> {
     let base = editable_path(&change.interface)?;
     if change.set.len() + change.delete.len() > MAX_CHANGES {
@@ -352,9 +354,9 @@ fn scoped_batch(change: &InterfaceConfigChange) -> Result<ConfigBatch, ApiError>
         paths
             .iter()
             .map(|rel| {
-                if rel.is_empty() || rel.len() > MAX_PATH_WORDS {
+                if rel.len() > MAX_PATH_WORDS {
                     return Err(ApiError::BadRequest(format!(
-                        "bad config path (1 to {MAX_PATH_WORDS} words): {rel:?}"
+                        "bad config path (at most {MAX_PATH_WORDS} words): {rel:?}"
                     )));
                 }
                 for word in rel {
@@ -530,11 +532,14 @@ mod tests {
             set: vec![vec!["description".into(), "a\nb".into()]],
             ..Default::default()
         }));
-        assert!(refused(InterfaceConfigChange {
-            interface: "eth0".into(),
+        // The bare node: create or remove a VLAN.
+        let created = scoped_batch(&InterfaceConfigChange {
+            interface: "eth0.300".into(),
             set: vec![vec![]],
             ..Default::default()
-        }));
+        })
+        .unwrap();
+        assert_eq!(created.set[0].join(" "), "interfaces ethernet eth0 vif 300");
         assert!(matches!(
             scoped_batch(&InterfaceConfigChange {
                 interface: "eth0;x".into(),

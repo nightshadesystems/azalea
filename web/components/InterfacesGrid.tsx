@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Shell from '@/components/Shell';
 import { api, compareNames } from '@/lib/api';
 import { useCounterStream } from '@/lib/stream';
@@ -9,7 +9,7 @@ import { Alert, Label } from '@/components/ds/misc';
 import { Button } from '@/components/ds/Button';
 import { Datagrid } from '@/components/ds/Datagrid';
 import { AdminLabel, KindLabel, OperLabel } from '@/components/status';
-import { InterfaceEditModal } from '@/components/InterfaceEditModal';
+import { DeleteInterfacesModal, InterfaceEditModal, type EditTarget } from '@/components/InterfaceEditModal';
 
 // Without the stream (next dev cannot proxy WebSockets) refetch instead.
 const POLL_MS = 5000;
@@ -25,8 +25,13 @@ export interface InterfacesGridProps {
 export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
   const [interfaces, setInterfaces] = useState<Interface[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<EditTarget | null>(null);
+  const [deleting, setDeleting] = useState<string[]>([]);
   const [notice, setNotice] = useState<{ text: string; detail?: string } | null>(null);
+  // The datagrid owns its selection; keep its reset handy for after a delete.
+  const clearSelection = useRef<() => void>(() => {});
+  // VLANs can be made and unmade; ethernet ports only edited.
+  const vlanPage = kinds.length === 1 && kinds[0] === 'vlan';
   const { live, connected } = useCounterStream();
   const admin = !!useSession()?.admin;
 
@@ -56,6 +61,13 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
   const saved = (name: string, output: string) => {
     setEditing(null);
     setNotice({ text: `${name} committed and saved.`, detail: output.trim() || undefined });
+    refresh();
+  };
+
+  const deleted = (names: string[], failed: string | null) => {
+    if (!failed) setDeleting([]);
+    clearSelection.current();
+    setNotice({ text: `Deleted ${names.join(', ')}.` });
     refresh();
   };
 
@@ -90,18 +102,40 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
           selectable
           rowKey={(r) => r.name}
           onRefresh={refresh}
-          actionBar={({ selected }) => {
-            const one = selected.size === 1 ? String([...selected][0]) : null;
+          actionBar={({ selected, clear }) => {
+            clearSelection.current = clear;
+            const names = [...selected].map(String);
+            const one = names.length === 1 ? names[0] : null;
+            const needAdmin = !admin ? 'Needs an admin login' : null;
             return (
-              <Button
-                sm
-                icon="pencil"
-                disabled={!one || !admin}
-                title={!admin ? 'Editing needs an admin login' : one ? `Edit ${one}` : 'Select one interface to edit'}
-                onClick={() => one && setEditing(one)}
-              >
-                Edit
-              </Button>
+              <>
+                {vlanPage && (
+                  <Button sm icon="plus" disabled={!admin} title={needAdmin ?? 'Add a VLAN'} onClick={() => setEditing({ create: 'vlan' })}>
+                    Add VLAN
+                  </Button>
+                )}
+                <Button
+                  sm
+                  icon="pencil"
+                  disabled={!one || !admin}
+                  title={needAdmin ?? (one ? `Edit ${one}` : 'Select one interface to edit')}
+                  onClick={() => one && setEditing({ name: one })}
+                >
+                  Edit
+                </Button>
+                {vlanPage && (
+                  <Button
+                    sm
+                    variant="danger-outline"
+                    icon="trash"
+                    disabled={names.length === 0 || !admin}
+                    title={needAdmin ?? (names.length ? `Delete ${names.join(', ')}` : 'Select VLANs to delete')}
+                    onClick={() => setDeleting(names)}
+                  >
+                    Delete
+                  </Button>
+                )}
+              </>
             );
           }}
           columns={[
@@ -129,7 +163,8 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
           placeholder="No interfaces of this type."
         />
       )}
-      <InterfaceEditModal name={editing} onClose={() => setEditing(null)} onSaved={saved} />
+      <InterfaceEditModal target={editing} interfaces={interfaces || []} onClose={() => setEditing(null)} onSaved={saved} />
+      <DeleteInterfacesModal names={deleting} onClose={() => setDeleting([])} onDeleted={deleted} />
     </Shell>
   );
 }

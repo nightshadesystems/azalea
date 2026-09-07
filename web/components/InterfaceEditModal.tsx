@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
-import { api } from '@/lib/api';
-import type { ConfigApplied, InterfaceConfig, InterfaceConfigChange } from '@/lib/types';
+import { api, compareNames } from '@/lib/api';
+import type { ConfigApplied, Interface, InterfaceConfig, InterfaceConfigChange, InterfaceKind } from '@/lib/types';
 import {
   diffForm,
   initialForm,
@@ -9,6 +9,7 @@ import {
   renderCommands,
   schemaFor,
   validateForm,
+  type Changes,
   type Field,
   type FormState,
   type Section,
@@ -20,13 +21,25 @@ import { Checkbox, FormField, Input, Select } from '@/components/ds/forms';
 import { Alert, Badge } from '@/components/ds/misc';
 import { KindLabel } from '@/components/status';
 
+/** Edit an existing interface, or create a VLAN on a parent. */
+export type EditTarget = { name: string } | { create: 'vlan' };
+
 export interface InterfaceEditModalProps {
-  /** Interface to edit; null keeps the modal closed. */
-  name: string | null;
+  /** What to open; null keeps the modal closed. */
+  target: EditTarget | null;
+  /** Every interface, for VLAN parents and duplicate checks. */
+  interfaces: Interface[];
   onClose: () => void;
   /** Called after a successful commit with what VyOS printed. */
   onSaved: (name: string, output: string) => void;
 }
+
+/** Kinds a `vif` can hang off, and their config-tree type word. */
+const VLAN_PARENTS: Partial<Record<InterfaceKind, string>> = {
+  ethernet: 'ethernet',
+  bonding: 'bonding',
+  bridge: 'bridge',
+};
 
 /** One list-valued leaf (addresses, prefixes): rows plus an add box. */
 function MultiInput({
@@ -91,18 +104,22 @@ function SectionFields({
   form,
   errors,
   onChange,
+  before,
 }: {
   section: Section;
   form: FormState;
   errors: Record<string, string>;
   onChange: (key: string, value: FormState[string]) => void;
+  /** Extra controls at the top of the grid (the VLAN parent and ID). */
+  before?: React.ReactNode;
 }) {
   const inputs = section.fields.filter((f) => f.type !== 'flag');
   const flags = section.fields.filter((f) => f.type === 'flag');
   return (
     <>
-      {inputs.length > 0 && (
+      {(inputs.length > 0 || before) && (
         <div className="cfg-grid">
+          {before}
           {inputs.map((f) => {
             const k = keyOf(f.path);
             const id = 'cfg-' + k.replace(/\W+/g, '-');
@@ -161,22 +178,39 @@ function SectionFields({
   );
 }
 
-export function InterfaceEditModal({ name, onClose, onSaved }: InterfaceEditModalProps) {
+export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: InterfaceEditModalProps) {
+  const creating = target != null && 'create' in target;
   const [config, setConfig] = useState<InterfaceConfig | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({});
   const [tab, setTab] = useState('general');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Create mode: which parent and which tag.
+  const [parent, setParent] = useState('');
+  const [vlanId, setVlanId] = useState('');
+
+  const parents = useMemo(
+    () => interfaces.filter((i) => VLAN_PARENTS[i.kind]).sort((a, b) => compareNames(a.name, b.name)),
+    [interfaces],
+  );
 
   useEffect(() => {
     setConfig(null);
     setLoadError(null);
     setSaveError(null);
     setTab('general');
-    if (!name) return;
+    if (!target) return;
+    if ('create' in target) {
+      const sections = schemaFor('vlan') || [];
+      setForm(initialForm(sections, {}));
+      setParent(parents[0]?.name ?? '');
+      setVlanId('');
+      setConfig({ name: '', kind: 'vlan', path: [], config: {} });
+      return;
+    }
     let cancelled = false;
-    api<InterfaceConfig>(`/api/config/interfaces/${encodeURIComponent(name)}`)
+    api<InterfaceConfig>(`/api/config/interfaces/${encodeURIComponent(target.name)}`)
       .then((c) => {
         if (cancelled) return;
         const sections = schemaFor(c.kind);
@@ -191,23 +225,49 @@ export function InterfaceEditModal({ name, onClose, onSaved }: InterfaceEditModa
     return () => {
       cancelled = true;
     };
-  }, [name]);
+    // `parents` only matters for the initial pick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
+  // In create mode the interface name and config path follow the form.
+  const parentRow = parents.find((p) => p.name === parent);
+  const newName = creating ? (parent && vlanId ? `${parent}.${vlanId}` : '') : config?.name ?? '';
+  const path = useMemo(() => {
+    if (!creating) return config?.path ?? [];
+    if (!parentRow || !vlanId) return [];
+    return ['interfaces', VLAN_PARENTS[parentRow.kind] ?? parentRow.kind, parentRow.name, 'vif', vlanId];
+  }, [creating, config, parentRow, vlanId]);
+
+  const createError = useMemo(() => {
+    if (!creating) return null;
+    if (!parent) return 'No ethernet, bond or bridge interface to attach a VLAN to.';
+    if (!/^\d+$/.test(vlanId) || Number(vlanId) < 1 || Number(vlanId) > 4094 || String(Number(vlanId)) !== vlanId)
+      return 'VLAN ID must be 1–4094.';
+    if (interfaces.some((i) => i.name === newName)) return `${newName} already exists; edit it instead.`;
+    return null;
+  }, [creating, parent, vlanId, newName, interfaces]);
 
   const sections = useMemo(() => (config ? schemaFor(config.kind) || [] : []), [config]);
   const errors = useMemo(() => validateForm(sections, form), [sections, form]);
-  const changes = useMemo(() => (config ? diffForm(sections, config.config, form) : { set: [], delete: [] }), [sections, config, form]);
+  const changes = useMemo<Changes>(() => {
+    if (!config) return { set: [], delete: [] };
+    const d = diffForm(sections, config.config, form);
+    // Creating: the bare node first, so an all-defaults VLAN still exists.
+    return creating ? { set: [[], ...d.set], delete: d.delete } : d;
+  }, [sections, config, form, creating]);
   const nChanges = changes.set.length + changes.delete.length;
+  const hasErrors = Object.keys(errors).length > 0 || createError != null;
 
-  const errorsIn = (s: Section) => s.fields.filter((f) => errors[keyOf(f.path)]).length;
+  const errorsIn = (s: Section) => s.fields.filter((f) => errors[keyOf(f.path)]).length + (s.id === 'general' && createError ? 1 : 0);
 
   const save = async () => {
-    if (!config || nChanges === 0 || Object.keys(errors).length > 0) return;
+    if (!config || nChanges === 0 || hasErrors) return;
     setSaving(true);
     setSaveError(null);
     try {
-      const body: InterfaceConfigChange = { interface: config.name, set: changes.set, delete: changes.delete };
+      const body: InterfaceConfigChange = { interface: newName, set: changes.set, delete: changes.delete };
       const applied = await api<ConfigApplied>('/api/config/interfaces', { method: 'POST', body: JSON.stringify(body) });
-      onSaved(config.name, applied.output);
+      onSaved(newName, applied.output);
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -215,17 +275,34 @@ export function InterfaceEditModal({ name, onClose, onSaved }: InterfaceEditModa
     }
   };
 
-  const hasErrors = Object.keys(errors).length > 0;
+  const createFields = creating ? (
+    <>
+      <FormField label="Parent interface" htmlFor="cfg-parent" required helper="Ethernet, bond or bridge carrying the tagged frames.">
+        <Select id="cfg-parent" value={parent} onChange={(e) => setParent(e.target.value)}>
+          {parents.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name}
+              {p.description ? ` — ${p.description}` : ''}
+            </option>
+          ))}
+        </Select>
+      </FormField>
+      <FormField label="VLAN ID" htmlFor="cfg-vlan-id" required error={vlanId && createError ? createError : undefined} helper="802.1Q tag, 1–4094.">
+        <Input id="cfg-vlan-id" className="mono" inputMode="numeric" placeholder="100" value={vlanId} onChange={(e) => setVlanId(e.target.value.trim())} autoFocus />
+      </FormField>
+    </>
+  ) : undefined;
 
   return (
     <Modal
-      open={name != null}
+      open={target != null}
       size="lg"
       onClose={saving ? undefined : onClose}
       title={
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-          Edit <span className="cfg-title-name">{name}</span>
-          {config && <KindLabel kind={config.kind} />}
+          {creating ? 'New VLAN' : 'Edit'}
+          {newName && <span className="cfg-title-name">{newName}</span>}
+          {config && !creating && <KindLabel kind={config.kind} />}
         </span>
       }
       footer={
@@ -237,7 +314,7 @@ export function InterfaceEditModal({ name, onClose, onSaved }: InterfaceEditModa
             Cancel
           </Button>
           <Button variant="primary" onClick={save} loading={saving} disabled={!config || saving || nChanges === 0 || hasErrors}>
-            Save
+            {creating ? 'Create' : 'Save'}
           </Button>
         </>
       }
@@ -268,17 +345,91 @@ export function InterfaceEditModal({ name, onClose, onSaved }: InterfaceEditModa
             {sections
               .filter((s) => s.id === tab)
               .map((s) => (
-                <SectionFields key={s.id} section={s} form={form} errors={errors} onChange={(k, v) => setForm((f) => ({ ...f, [k]: v }))} />
+                <SectionFields
+                  key={s.id}
+                  section={s}
+                  form={form}
+                  errors={errors}
+                  before={s.id === 'general' ? createFields : undefined}
+                  onChange={(k, v) => setForm((f) => ({ ...f, [k]: v }))}
+                />
               ))}
           </div>
-          {nChanges > 0 && (
+          {nChanges > 0 && path.length > 0 && (
             <details className="cfg-commands">
               <summary>Show the {nChanges === 1 ? 'command' : 'commands'} this will run</summary>
-              <pre className="mono">{renderCommands(config.path, changes)}</pre>
+              <pre className="mono">{renderCommands(path, changes)}</pre>
             </details>
           )}
         </>
       )}
+    </Modal>
+  );
+}
+
+export interface DeleteInterfacesModalProps {
+  /** Names to remove; empty keeps the modal closed. */
+  names: string[];
+  onClose: () => void;
+  onDeleted: (names: string[], failed: string | null) => void;
+}
+
+/** Confirm and remove VLANs, one commit each. */
+export function DeleteInterfacesModal({ names, onClose, onDeleted }: DeleteInterfacesModalProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setError(null), [names]);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    const done: string[] = [];
+    try {
+      for (const name of names) {
+        await api<ConfigApplied>('/api/config/interfaces', {
+          method: 'POST',
+          body: JSON.stringify({ interface: name, set: [], delete: [[]] } satisfies InterfaceConfigChange),
+        });
+        done.push(name);
+      }
+      onDeleted(done, null);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      if (done.length) onDeleted(done, message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open={names.length > 0}
+      title={`Delete ${names.length === 1 ? names[0] : `${names.length} VLANs`}`}
+      onClose={busy ? undefined : onClose}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={run} loading={busy} disabled={busy}>
+            Delete
+          </Button>
+        </>
+      }
+    >
+      {error && (
+        <Alert status="danger">
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{error}</pre>
+        </Alert>
+      )}
+      <p style={{ margin: '0 0 8px' }}>
+        This removes the interface and everything configured under it, then commits and saves. Anything referring to it (firewall, DHCP
+        server, routes) will fail to commit.
+      </p>
+      <ul className="mono" style={{ margin: 0, paddingLeft: 20 }}>
+        {names.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
     </Modal>
   );
 }
