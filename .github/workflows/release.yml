@@ -1,8 +1,12 @@
 name: Release
 
 # Tag `vX.Y.Z` → amd64 + arm64 .deb, minisign signatures, GitHub Release.
-# Needs the MINISIGN_SECRET_KEY repository secret (the key whose public
-# half is pinned in packaging/install.sh).
+# Needs the MINISIGN_SECRET_KEY repository secret (an unencrypted
+# minisign secret key; see docs/release.md) whose public half is
+# pinned in packaging/install.sh.
+#
+# Builds run inside rust:1.96-bookworm so the binaries link against
+# Debian 12's glibc, which is what VyOS 1.4 and 1.5 run.
 on:
   push:
     tags: ['v*']
@@ -36,28 +40,28 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
           - arch: arm64
-            target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    container: rust:1.96-bookworm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: web-out
           path: web/out
-      - run: rustup show
-      - run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-deb --locked
       - name: Check tag matches Cargo version
         run: |
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "::error::tag ${GITHUB_REF_NAME} != Cargo version $v"; exit 1; }
-      - run: cargo deb -p azalea-webd --target ${{ matrix.target }} --output packaging/out/
-      - run: ls -la packaging/out && dpkg-deb --info packaging/out/*.deb
+      - run: cargo deb -p azalea-webd --output packaging/out/
+      - run: |
+          ls -la packaging/out
+          dpkg-deb --info packaging/out/*.deb
+          [ "$(dpkg-deb -f packaging/out/*.deb Architecture)" = "${{ matrix.arch }}" ]
       - uses: actions/upload-artifact@v4
         with:
           name: deb-${{ matrix.arch }}
@@ -68,6 +72,7 @@ jobs:
     needs: deb
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: deb-*
@@ -80,14 +85,23 @@ jobs:
           [ -n "$MINISIGN_SECRET_KEY" ] || { echo "::error::MINISIGN_SECRET_KEY secret is not set"; exit 1; }
           sudo apt-get update && sudo apt-get install -y minisign
           printf '%s\n' "$MINISIGN_SECRET_KEY" > minisign.key
+          chmod 600 minisign.key
+          # The secret must be the private half of the key install.sh pins.
+          minisign -R -s minisign.key -p minisign.pub < /dev/null
+          pinned=$(sed -n 's/^PUBKEY="${AZALEA_PUBKEY:-\(.*\)}"$/\1/p' packaging/install.sh)
+          actual=$(sed -n 2p minisign.pub)
+          [ "$pinned" = "$actual" ] || { echo "::error::MINISIGN_SECRET_KEY does not match the key pinned in packaging/install.sh"; exit 1; }
           for f in dist/*.deb; do
-            minisign -S -s minisign.key -m "$f" -t "azalea ${GITHUB_REF_NAME}" < /dev/null
+            minisign -S -s minisign.key -m "$f" -t "azalea ${GITHUB_REF_NAME} $(basename "$f")" < /dev/null
+            bash packaging/install.sh --verify "$f"
           done
           rm -f minisign.key
+          (cd dist && sha256sum *.deb > SHA256SUMS)
           ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.deb
             dist/*.minisig
+            dist/SHA256SUMS
           generate_release_notes: true

@@ -52,7 +52,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
       - run: shellcheck packaging/install.sh packaging/debian/azalea-reinstall.sh packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
 
-  # The .deb must build on every push, not only at release time.
+  # The .deb must build on every push, not only at release time. Same
+  # bookworm container as the release so glibc matches VyOS.
   deb:
     runs-on: ubuntu-latest
     steps:
@@ -62,12 +63,37 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: rustup show
+      - run: cd web && npm ci --no-audit --no-fund && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-out
+          path: web/out
+          if-no-files-found: error
+  deb-build:
+    needs: deb
+    runs-on: ubuntu-latest
+    container: rust:1.96-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-out
+          path: web/out
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-deb --locked
-      - run: cd web && npm ci --no-audit --no-fund && npm run build
       - run: cargo deb -p azalea-webd --output packaging/out/
-      - run: dpkg-deb --info packaging/out/*.deb && dpkg-deb --contents packaging/out/*.deb | head -40
+      - run: dpkg-deb --info packaging/out/*.deb && dpkg-deb --contents packaging/out/*.deb | grep -v /_next/
+      # Sign with a throwaway key and run the installer's verifier and
+      # package install on a bare Debian 12, which is what VyOS is.
+      - name: Verify with install.sh
+        run: |
+          apt-get update -qq && apt-get install -y -qq minisign xxd >/dev/null
+          minisign -G -f -p ci.pub -s ci.key -W < /dev/null
+          f=$(ls packaging/out/*.deb)
+          minisign -S -s ci.key -m "$f" -t "ci" < /dev/null
+          AZALEA_PUBKEY=$(sed -n 2p ci.pub) bash packaging/install.sh --verify "$f"
+          ! AZALEA_PUBKEY=$(sed -n 2p ci.pub) bash packaging/install.sh --verify /etc/hostname
+          dpkg -i "$f" && azalea-webd --version
       - uses: actions/upload-artifact@v4
         with:
           name: azalea-deb-amd64

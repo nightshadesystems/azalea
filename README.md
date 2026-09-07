@@ -6,6 +6,15 @@ dependencies beyond the router itself.
     curl -fsSL https://nightshadesystems.github.io/azalea/install.sh | sudo bash
 
 Then open `https://<router>:8443` and sign in with a VyOS local user.
+Rerunning the one-liner upgrades in place. Other forms:
+
+    ... | sudo bash -s -- --version 0.1.0     # a specific release
+    ... | sudo bash -s -- --uninstall         # remove package, state, boot hook
+    sudo bash install.sh --deb azalea_0.1.0_amd64.deb   # offline, .minisig beside it
+    bash install.sh --verify azalea_0.1.0_amd64.deb     # signature check only
+
+Packages are minisign-signed; the installer verifies them with the
+OpenSSL VyOS ships. Releasing is described in `docs/release.md`.
 
 ## Layout
 

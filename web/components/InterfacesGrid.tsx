@@ -166,7 +166,7 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
               render: (r) => (
                 <span className="cell-mono" style={{ whiteSpace: 'nowrap' }}>
                   {formatBytes(r.counters.rx_bytes)}
-                  {rate(r.name, 'rx') && <span className="dim"> · {rate(r.name, 'rx')}</span>}
+                  {rate(r.name, 'rx') && <div className="dim">{rate(r.name, 'rx')}</div>}
                 </span>
               ),
             },
@@ -178,7 +178,7 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
               render: (r) => (
                 <span className="cell-mono" style={{ whiteSpace: 'nowrap' }}>
                   {formatBytes(r.counters.tx_bytes)}
-                  {rate(r.name, 'tx') && <span className="dim"> · {rate(r.name, 'tx')}</span>}
+                  {rate(r.name, 'tx') && <div className="dim">{rate(r.name, 'tx')}</div>}
                 </span>
               ),
             },
