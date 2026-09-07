@@ -6,6 +6,7 @@ import type { Identity, Session } from '@/lib/types';
 import { Header, HeaderAction, Subnav, type NavItem } from '@/components/ds/Header';
 import { VerticalNav, type VerticalNavGroup } from '@/components/ds/VerticalNav';
 import { Wordmark } from '@/components/Brand';
+import { setDetail, useDetail } from '@/lib/detail';
 
 interface Tab extends NavItem {
   href: string;
@@ -77,6 +78,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [hostname, setHostname] = useState('');
   const [theme, toggleTheme] = useTheme();
+  const detail = useDetail();
 
   useEffect(() => {
     api<Session>('/api/session').then(setSession).catch(() => {});
@@ -110,6 +112,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         title={<Wordmark />}
         actions={
           <>
+            <div className="detail-toggle" role="group" aria-label="Configuration detail" title="Basic shows the everyday options; Advanced shows everything VyOS has">
+              <button type="button" className={detail === 'basic' ? 'active' : ''} onClick={() => setDetail('basic')}>
+                Basic
+              </button>
+              <button type="button" className={detail === 'advanced' ? 'active' : ''} onClick={() => setDetail('advanced')}>
+                Advanced
+              </button>
+            </div>
             <HeaderAction icon={theme === 'dark' ? 'sun' : 'moon'} label="Toggle theme" onClick={toggleTheme} />
             <HeaderAction
               icon="logout"

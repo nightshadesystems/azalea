@@ -20,6 +20,8 @@ import { Button } from '@/components/ds/Button';
 import { FormField, Input, Select } from '@/components/ds/forms';
 import { Alert, Badge } from '@/components/ds/misc';
 import { KindLabel, KIND_LABEL } from '@/components/status';
+import { setDetail, useDetail } from '@/lib/detail';
+import { basicSchema, countLeaves } from '@/lib/basic-options';
 import { ChildrenEditor, GroupPanel, TagList, type EditorContext } from '@/components/ConfigTreeEditor';
 
 /** Edit an existing interface, or create one of a kind. */
@@ -63,6 +65,7 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
   const [newName, setNewName] = useState('');
   const [parent, setParent] = useState('');
   const [vlanId, setVlanId] = useState('');
+  const detail = useDetail();
 
   const parents = useMemo(
     () => interfaces.filter((i) => VLAN_PARENTS.includes(i.kind)).sort((a, b) => compareNames(a.name, b.name)),
@@ -110,7 +113,18 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
     if (createKind === 'vlan') return parentRow && vlanId ? ['interfaces', parentRow.kind, parentRow.name, 'vif', vlanId] : [];
     return name ? ['interfaces', createKind!, name] : [];
   }, [creating, createKind, config, parentRow, vlanId, name]);
-  const schema = useMemo(() => (path.length ? schemaAt(path) : createKind && createKind !== 'vlan' ? VYOS_INTERFACES[createKind] : undefined), [path, createKind]);
+  // The schema does not wait for a name: a new VLAN edits its parent
+  // type's `vif` node, any other new interface its type's node.
+  const fullSchema = useMemo(() => {
+    if (!creating) return path.length ? schemaAt(path) : undefined;
+    if (createKind === 'vlan') return parentRow ? schemaAt(['interfaces', parentRow.kind, parentRow.name, 'vif', '0']) : undefined;
+    return VYOS_INTERFACES[createKind!];
+  }, [creating, createKind, path, parentRow]);
+  const kind: InterfaceKind = createKind ?? config?.kind ?? 'other';
+  // Basic trims the schema; the diff and validation walk the trimmed
+  // tree, so hidden options are neither shown nor touched.
+  const schema = useMemo(() => (fullSchema && detail === 'basic' ? basicSchema(fullSchema, kind) : fullSchema), [fullSchema, detail, kind]);
+  const hidden = fullSchema && schema ? countLeaves(fullSchema) - countLeaves(schema) : 0;
   const typeNode = createKind && createKind !== 'vlan' ? VYOS_INTERFACES[createKind] : undefined;
 
   const createError = useMemo(() => {
@@ -138,7 +152,7 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
   const hasErrors = complaints.length > 0 || createError != null;
 
   const sections = useMemo(() => {
-    const groups = (schema?.children ?? []).filter((c) => c.kind !== 'leaf');
+    const groups = (schema?.children ?? []).filter((c) => c.kind !== 'leaf' && (c.children?.length ?? 0) > 0);
     return [{ id: 'general', label: 'General', node: null as SchemaNode | null }, ...groups.map((g) => ({ id: g.name, label: humanize(g.name), node: g as SchemaNode | null }))];
   }, [schema]);
   const complaintsIn = (id: string) =>
@@ -225,7 +239,7 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
           <span className="spinner spinner-md"></span>Loading configuration…
         </div>
       )}
-      {config && schema && (
+      {config && (
         <>
           {saveError && (
             <Alert status="danger">
@@ -240,7 +254,7 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
                   const present = s.node ? tree[s.node.name] !== undefined : true;
                   return (
                     <button key={s.id} type="button" role="tab" className={'clr-tab-link' + (present ? '' : ' cfg-section-off')} aria-selected={s.id === tab} onClick={() => setTab(s.id)}>
-                      {s.label}
+                      <span className="cfg-tab-label">{s.label}</span>
                       {n > 0 && <Badge status="danger">{n}</Badge>}
                     </button>
                   );
@@ -251,7 +265,8 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
               {active.id === 'general' && (
                 <>
                   {createFields}
-                  <ChildrenEditor node={schema} path={[]} value={tree} onChange={(v) => setTree(v ?? {})} ctx={ctx} only="leaves" />
+                  {schema && <ChildrenEditor node={schema} path={[]} value={tree} onChange={(v) => setTree(v ?? {})} ctx={ctx} only="leaves" />}
+                  {!schema && createKind === 'vlan' && <Alert status="warning">No ethernet, bond, bridge, MACVLAN, virtual-ethernet or wireless interface to attach a VLAN to.</Alert>}
                 </>
               )}
               {active.node && active.node.kind === 'tag' && (
@@ -281,6 +296,14 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
                   }}
                   ctx={ctx}
                 />
+              )}
+              {hidden > 0 && (
+                <p className="cfg-hidden">
+                  Basic view: {hidden} advanced option{hidden === 1 ? '' : 's'} hidden.{' '}
+                  <button type="button" className="cfg-link" onClick={() => setDetail('advanced')}>
+                    Show advanced
+                  </button>
+                </p>
               )}
               {nChanges > 0 && path.length > 0 && (
                 <details className="cfg-commands">

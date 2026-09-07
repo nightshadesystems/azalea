@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import type { CfgNode } from '@/lib/types';
 import {
-  hasContent,
   humanize,
   isEnum,
   isNumeric,
@@ -15,7 +14,6 @@ import {
 } from '@/lib/vyos-schema';
 import { Button } from '@/components/ds/Button';
 import { Checkbox, FormField, Input, Select } from '@/components/ds/forms';
-import { Icon } from '@/components/ds/misc';
 
 /** Shared context: interface names for completion, and whether flags stay compact. */
 export interface EditorContext {
@@ -82,23 +80,25 @@ function ValueControl({ node, id, value, onChange, ctx, placeholder, autoFocus, 
 
 const idFor = (path: string[]) => 'cfg-' + path.join('-').replace(/[^A-Za-z0-9_-]+/g, '_');
 
-/** Help text plus the formats VyOS accepts. */
+/**
+ * Help text, then one line per value format VyOS accepts. A format
+ * whose description just repeats the help (`txt Description`) is noise
+ * and dropped; a lone `txt` says nothing either.
+ */
 function helperFor(node: SchemaNode): React.ReactNode {
-  const formats = node.formats?.filter((f) => f.help) ?? [];
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  let formats = (node.formats ?? []).filter((f) => f.help && !same(f.help, node.help ?? ''));
+  if (formats.length === 1 && formats[0]!.format === 'txt') formats = [];
   if (!node.help && formats.length === 0) return undefined;
   return (
-    <>
-      {node.help}
-      {formats.length > 0 && (
-        <span className="cfg-formats">
-          {formats.map((f) => (
-            <span key={f.format}>
-              <span className="mono">{f.format}</span> {f.help}
-            </span>
-          ))}
+    <span className="cfg-help">
+      {node.help && <span>{node.help}</span>}
+      {formats.map((f) => (
+        <span key={f.format} className="cfg-format">
+          <span className="mono">{f.format}</span> {f.help}
         </span>
-      )}
-    </>
+      ))}
+    </span>
   );
 }
 
@@ -266,39 +266,29 @@ export function ChildrenEditor({ node, path, value, onChange, ctx, only }: Child
   );
 }
 
-/** A collapsible group for a `node`. Present in the config → open; absent → collapsed and greyed until enabled. */
+/** A group for a `node`: its fields when present in the config, otherwise just an Enable button. */
 export function GroupPanel({ node, path, value, onChange, ctx, title }: ChildrenProps & { title?: React.ReactNode }) {
   const present = value !== undefined;
-  const [open, setOpen] = useState(present && hasContent(value));
   const count = present ? Object.keys(value).length : 0;
   return (
     <section className={'cfg-group' + (present ? '' : ' cfg-group-off')}>
       <header className="cfg-group-head">
-        <button type="button" className="cfg-group-toggle" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <Icon shape="angle" dir={open ? 'down' : 'right'} size={12} />
-          <span className="cfg-group-title">{title ?? humanize(node.name)}</span>
+        <span className="cfg-group-title">
+          {title ?? humanize(node.name)}
           {count > 0 && <span className="cfg-group-count">{count}</span>}
-        </button>
+        </span>
         {node.help && <span className="cfg-group-help">{node.help}</span>}
         {present ? (
           <Button sm variant="link-neutral" icon="trash" onClick={() => onChange(undefined)} title={`Remove ${humanize(node.name)} and everything under it`}>
             Remove
           </Button>
         ) : (
-          <Button
-            sm
-            variant="link"
-            icon="plus"
-            onClick={() => {
-              onChange({});
-              setOpen(true);
-            }}
-          >
+          <Button sm variant="link" icon="plus" onClick={() => onChange({})}>
             Enable
           </Button>
         )}
       </header>
-      {open && present && (
+      {present && (
         <div className="cfg-group-body">
           <ChildrenEditor node={node} path={path} value={value} onChange={(v) => onChange(v ?? {})} ctx={ctx} />
         </div>
