@@ -8,3 +8,6 @@
 /packaging/out/
 *.deb
 *.minisig
+
+# Release signing key never lives in the tree
+azalea.key

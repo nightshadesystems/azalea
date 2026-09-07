@@ -53,15 +53,18 @@ jobs:
           path: web/out
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-deb --locked
-      - name: Check tag matches Cargo version
+      - name: Check tag matches VERSION
         run: |
-          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "::error::tag ${GITHUB_REF_NAME} != Cargo version $v"; exit 1; }
-      - run: cargo deb -p azalea-webd --output packaging/out/
+          v=$(tr -d '[:space:]' < VERSION)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "::error::tag ${GITHUB_REF_NAME} != VERSION $v"; exit 1; }
+      # --deb-version: the package (and its filename, which install.sh
+      # computes as azalea_<VERSION>_<arch>.deb) carries VERSION verbatim.
+      - run: cargo deb -p azalea-webd --deb-version "$(tr -d '[:space:]' < VERSION)" --output packaging/out/
       - run: |
           ls -la packaging/out
           dpkg-deb --info packaging/out/*.deb
           [ "$(dpkg-deb -f packaging/out/*.deb Architecture)" = "${{ matrix.arch }}" ]
+          [ -f "packaging/out/azalea_$(tr -d '[:space:]' < VERSION)_${{ matrix.arch }}.deb" ]
       - uses: actions/upload-artifact@v4
         with:
           name: deb-${{ matrix.arch }}

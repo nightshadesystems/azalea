@@ -21,7 +21,7 @@ STATE="/config/azalea"
 HOOK="/config/scripts/vyos-postconfig-bootup.script"
 # Nightshade Systems release signing key (minisign). AZALEA_PUBKEY in the
 # environment overrides it for testing against a throwaway key.
-PUBKEY="${AZALEA_PUBKEY:-RWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}"
+PUBKEY="${AZALEA_PUBKEY:-RWQUmHs/MeXQg6EYUXFvCvJ1uVK+igoy46uF5TG7SvYX6bGgAsfp+Not}"
 
 VERSION=""
 DEB_FILE=""
@@ -108,7 +108,7 @@ esac
 have_systemd() { [ -d /run/systemd/system ]; }
 
 if [ "$UNINSTALL" -eq 1 ]; then
-    have_systemd && systemctl disable --now azalea-webd 2>/dev/null || true
+    if have_systemd; then systemctl disable --now azalea-webd 2>/dev/null || true; fi
     dpkg --purge azalea 2>/dev/null || true
     rm -rf "$STATE"
     [ -f "$HOOK" ] && sed -i '/^# BEGIN azalea$/,/^# END azalea$/d' "$HOOK"

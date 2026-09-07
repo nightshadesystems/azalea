@@ -81,8 +81,10 @@ jobs:
           path: web/out
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-deb --locked
-      - run: cargo deb -p azalea-webd --output packaging/out/
-      - run: dpkg-deb --info packaging/out/*.deb && dpkg-deb --contents packaging/out/*.deb | grep -v /_next/
+      - run: cargo deb -p azalea-webd --deb-version "$(tr -d '[:space:]' < VERSION)" --output packaging/out/
+      - run: |
+          dpkg-deb --info packaging/out/*.deb && dpkg-deb --contents packaging/out/*.deb | grep -v /_next/
+          [ -f "packaging/out/azalea_$(tr -d '[:space:]' < VERSION)_amd64.deb" ]
       # Sign with a throwaway key and run the installer's verifier and
       # package install on a bare Debian 12, which is what VyOS is.
       - name: Verify with install.sh
