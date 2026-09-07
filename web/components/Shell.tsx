@@ -15,7 +15,7 @@ interface Tab extends NavItem {
 // Top tab bar. Add a tab here and a SIDE_NAV entry for its left nav.
 const TABS: Tab[] = [
   { label: 'Dashboard', href: '/dashboard/' },
-  { label: 'Interfaces', href: '/interfaces/ethernet/', root: '/interfaces' },
+  { label: 'Interfaces', href: '/interfaces/bonding/', root: '/interfaces' },
 ];
 
 // Left-hand navigation per tab.
@@ -23,7 +23,25 @@ const SIDE_NAV: Record<string, VerticalNavGroup> = {
   '/interfaces': {
     label: 'Interfaces',
     items: [
+      { id: '/interfaces/bonding/', label: 'Bond', icon: 'link' },
+      { id: '/interfaces/bridge/', label: 'Bridge', icon: 'network-switch' },
+      { id: '/interfaces/dummy/', label: 'Dummy', icon: 'circle' },
       { id: '/interfaces/ethernet/', label: 'Ethernet', icon: 'network-settings' },
+      { id: '/interfaces/geneve/', label: 'Geneve', icon: 'cloud-network' },
+      { id: '/interfaces/l2tpv3/', label: 'L2TPv3', icon: 'connect' },
+      { id: '/interfaces/loopback/', label: 'Loopback', icon: 'host' },
+      { id: '/interfaces/macsec/', label: 'MACsec', icon: 'lock' },
+      { id: '/interfaces/openvpn/', label: 'OpenVPN', icon: 'shield' },
+      { id: '/interfaces/wireguard/', label: 'WireGuard', icon: 'shield-check' },
+      { id: '/interfaces/pppoe/', label: 'PPPoE', icon: 'phone-handset' },
+      { id: '/interfaces/macvlan/', label: 'MACVLAN', icon: 'clone' },
+      { id: '/interfaces/sstp-client/', label: 'SSTP Client', icon: 'certificate' },
+      { id: '/interfaces/tunnel/', label: 'Tunnel', icon: 'switch' },
+      { id: '/interfaces/virtual-ethernet/', label: 'Virtual Ethernet', icon: 'two-way-arrows' },
+      { id: '/interfaces/vti/', label: 'VTI', icon: 'vm' },
+      { id: '/interfaces/vxlan/', label: 'VXLAN', icon: 'cloud' },
+      { id: '/interfaces/wireless/', label: 'Wireless LAN', icon: 'wifi' },
+      { id: '/interfaces/wwan/', label: 'WWAN', icon: 'mobile' },
       { id: '/interfaces/vlan/', label: 'VLAN', icon: 'network-globe' },
     ],
   },

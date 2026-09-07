@@ -60,21 +60,75 @@ pub struct Disk {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum InterfaceKind {
-    Ethernet,
-    Vlan,
-    Bridge,
     Bonding,
-    Tunnel,
-    Wireguard,
-    Loopback,
+    Bridge,
     Dummy,
+    Ethernet,
+    Geneve,
+    L2tpv3,
+    Loopback,
+    Macsec,
+    Openvpn,
+    Wireguard,
+    Pppoe,
+    PseudoEthernet,
+    Sstpc,
+    Tunnel,
+    VirtualEthernet,
+    Vti,
+    Vxlan,
+    Wireless,
+    Wwan,
+    /// A VIF (`eth0.100`, `bond0.10.20`) on any parent.
+    Vlan,
     #[default]
     Other,
 }
 
+/// The kinds with a `vif` tag node, and those with `vif-s` (QinQ).
+const VIF_PARENTS: &[InterfaceKind] = &[
+    InterfaceKind::Ethernet,
+    InterfaceKind::Bonding,
+    InterfaceKind::Bridge,
+    InterfaceKind::PseudoEthernet,
+    InterfaceKind::VirtualEthernet,
+    InterfaceKind::Wireless,
+];
+const VIF_S_PARENTS: &[InterfaceKind] = &[
+    InterfaceKind::Ethernet,
+    InterfaceKind::Bonding,
+    InterfaceKind::PseudoEthernet,
+    InterfaceKind::VirtualEthernet,
+    InterfaceKind::Wireless,
+];
+
 impl InterfaceKind {
+    /// Every kind with an `interfaces <type>` node, in the order the UI
+    /// lists them.
+    pub const CONFIGURABLE: &'static [InterfaceKind] = &[
+        Self::Bonding,
+        Self::Bridge,
+        Self::Dummy,
+        Self::Ethernet,
+        Self::Geneve,
+        Self::L2tpv3,
+        Self::Loopback,
+        Self::Macsec,
+        Self::Openvpn,
+        Self::Wireguard,
+        Self::Pppoe,
+        Self::PseudoEthernet,
+        Self::Sstpc,
+        Self::Tunnel,
+        Self::VirtualEthernet,
+        Self::Vti,
+        Self::Vxlan,
+        Self::Wireless,
+        Self::Wwan,
+    ];
+
     /// Classify a VyOS interface by name. VIFs (`eth0.100`, `bond0.10`)
     /// are VLANs whatever their parent.
     pub fn from_name(name: &str) -> Self {
@@ -86,64 +140,98 @@ impl InterfaceKind {
             .take_while(|c| c.is_ascii_alphabetic())
             .collect();
         match prefix.as_str() {
-            "eth" => Self::Ethernet,
-            "br" => Self::Bridge,
             "bond" => Self::Bonding,
-            "tun" | "gre" | "vti" | "vxlan" | "geneve" | "l2tpeth" | "erspan" | "ip" | "sit" => {
-                Self::Tunnel
-            }
-            "wg" => Self::Wireguard,
-            "lo" => Self::Loopback,
+            "br" => Self::Bridge,
             "dum" => Self::Dummy,
+            "eth" => Self::Ethernet,
+            "gnv" => Self::Geneve,
+            "l" if name.starts_with("l2tpeth") => Self::L2tpv3,
+            "lo" => Self::Loopback,
+            "macsec" => Self::Macsec,
+            "vtun" => Self::Openvpn,
+            "wg" => Self::Wireguard,
+            "pppoe" => Self::Pppoe,
+            "peth" => Self::PseudoEthernet,
+            "sstpc" => Self::Sstpc,
+            "tun" => Self::Tunnel,
+            "veth" => Self::VirtualEthernet,
+            "vti" => Self::Vti,
+            "vxlan" => Self::Vxlan,
+            "wlan" => Self::Wireless,
+            "wwan" => Self::Wwan,
             _ => Self::Other,
         }
     }
 
-    /// Where an interface lives in the config tree, for the kinds the
-    /// UI can edit: `interfaces ethernet eth0`, or for a VIF
-    /// `interfaces <parent type> <parent> vif <id>`. QinQ (`eth0.100.200`)
-    /// and every other kind return `None`.
-    pub fn config_path(name: &str) -> Option<Vec<String>> {
-        let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect());
-        if let Some((parent, vid)) = name.split_once('.') {
-            if parent.contains('.') || !parent.chars().any(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            let id: u16 = vid.parse().ok()?;
-            if !(1..=4094).contains(&id) || vid != id.to_string() {
-                return None;
-            }
-            let prefix: String = parent
-                .chars()
-                .take_while(|c| c.is_ascii_alphabetic())
-                .collect();
-            let parent_type = match prefix.as_str() {
-                "eth" => "ethernet",
-                "bond" => "bonding",
-                "br" => "bridge",
-                "peth" => "pseudo-ethernet",
-                "wlan" => "wireless",
-                _ => return None,
-            };
-            return words(&["interfaces", parent_type, parent, "vif", vid]);
-        }
-        match Self::from_name(name) {
-            Self::Ethernet => words(&["interfaces", "ethernet", name]),
-            _ => None,
+    /// The `interfaces <type>` word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bonding => "bonding",
+            Self::Bridge => "bridge",
+            Self::Dummy => "dummy",
+            Self::Ethernet => "ethernet",
+            Self::Geneve => "geneve",
+            Self::L2tpv3 => "l2tpv3",
+            Self::Loopback => "loopback",
+            Self::Macsec => "macsec",
+            Self::Openvpn => "openvpn",
+            Self::Wireguard => "wireguard",
+            Self::Pppoe => "pppoe",
+            Self::PseudoEthernet => "pseudo-ethernet",
+            Self::Sstpc => "sstpc",
+            Self::Tunnel => "tunnel",
+            Self::VirtualEthernet => "virtual-ethernet",
+            Self::Vti => "vti",
+            Self::Vxlan => "vxlan",
+            Self::Wireless => "wireless",
+            Self::Wwan => "wwan",
+            Self::Vlan => "vlan",
+            Self::Other => "other",
         }
     }
 
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ethernet => "ethernet",
-            Self::Vlan => "vlan",
-            Self::Bridge => "bridge",
-            Self::Bonding => "bonding",
-            Self::Tunnel => "tunnel",
-            Self::Wireguard => "wireguard",
-            Self::Loopback => "loopback",
-            Self::Dummy => "dummy",
-            Self::Other => "other",
+    /// Where an interface lives in the config tree: `interfaces <type>
+    /// <name>` for every configurable kind; for a VIF `interfaces <parent
+    /// type> <parent> vif <id>`, and for QinQ (`eth0.100.200`)
+    /// `... vif-s 100 vif-c 200`. Other names return `None`.
+    pub fn config_path(name: &str) -> Option<Vec<String>> {
+        let words = |w: &[&str]| -> Vec<String> { w.iter().map(|s| s.to_string()).collect() };
+        let vlan_id = |vid: &str| -> Option<u16> {
+            let id: u16 = vid.parse().ok()?;
+            ((0..=4094).contains(&id) && vid == id.to_string()).then_some(id)
+        };
+        let parts: Vec<&str> = name.split('.').collect();
+        match parts.as_slice() {
+            [plain] => {
+                let kind = Self::from_name(plain);
+                Self::CONFIGURABLE
+                    .contains(&kind)
+                    .then(|| words(&["interfaces", kind.as_str(), plain]))
+            }
+            [parent, vid] => {
+                let kind = Self::from_name(parent);
+                vlan_id(vid)?;
+                VIF_PARENTS
+                    .contains(&kind)
+                    .then(|| words(&["interfaces", kind.as_str(), parent, "vif", vid]))
+            }
+            [parent, svid, cvid] => {
+                let kind = Self::from_name(parent);
+                vlan_id(svid)?;
+                vlan_id(cvid)?;
+                VIF_S_PARENTS.contains(&kind).then(|| {
+                    words(&[
+                        "interfaces",
+                        kind.as_str(),
+                        parent,
+                        "vif-s",
+                        svid,
+                        "vif-c",
+                        cvid,
+                    ])
+                })
+            }
+            _ => None,
         }
     }
 }
@@ -265,6 +353,7 @@ impl InterfaceSummary {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -277,16 +366,39 @@ mod tests {
         assert_eq!(InterfaceKind::from_name("bond0"), InterfaceKind::Bonding);
         assert_eq!(InterfaceKind::from_name("wg0"), InterfaceKind::Wireguard);
         assert_eq!(InterfaceKind::from_name("tun0"), InterfaceKind::Tunnel);
-        assert_eq!(InterfaceKind::from_name("vti0"), InterfaceKind::Tunnel);
+        assert_eq!(InterfaceKind::from_name("vti0"), InterfaceKind::Vti);
         assert_eq!(InterfaceKind::from_name("lo"), InterfaceKind::Loopback);
         assert_eq!(InterfaceKind::from_name("dum0"), InterfaceKind::Dummy);
-        assert_eq!(InterfaceKind::from_name("pppoe0"), InterfaceKind::Other);
+        assert_eq!(InterfaceKind::from_name("l2tpeth0"), InterfaceKind::L2tpv3);
+        assert_eq!(InterfaceKind::from_name("vtun0"), InterfaceKind::Openvpn);
+        assert_eq!(
+            InterfaceKind::from_name("peth0"),
+            InterfaceKind::PseudoEthernet
+        );
+        assert_eq!(
+            InterfaceKind::from_name("veth0"),
+            InterfaceKind::VirtualEthernet
+        );
+        assert_eq!(InterfaceKind::from_name("sstpc0"), InterfaceKind::Sstpc);
+        assert_eq!(InterfaceKind::from_name("wwan0"), InterfaceKind::Wwan);
+        assert_eq!(InterfaceKind::from_name("pppoe0"), InterfaceKind::Pppoe);
+        assert_eq!(InterfaceKind::from_name("gre0"), InterfaceKind::Other);
+        assert_eq!(
+            serde_json::to_string(&InterfaceKind::PseudoEthernet).unwrap(),
+            "\"pseudo-ethernet\""
+        );
     }
 
     #[test]
-    fn config_paths_for_editable_kinds() {
+    fn config_paths_for_every_kind() {
         let p = |n: &str| InterfaceKind::config_path(n).map(|w| w.join(" "));
         assert_eq!(p("eth0").as_deref(), Some("interfaces ethernet eth0"));
+        assert_eq!(p("wg0").as_deref(), Some("interfaces wireguard wg0"));
+        assert_eq!(
+            p("peth0").as_deref(),
+            Some("interfaces pseudo-ethernet peth0")
+        );
+        assert_eq!(p("lo").as_deref(), Some("interfaces loopback lo"));
         assert_eq!(
             p("eth1.100").as_deref(),
             Some("interfaces ethernet eth1 vif 100")
@@ -296,13 +408,19 @@ mod tests {
             Some("interfaces bonding bond0 vif 10")
         );
         assert_eq!(p("br0.5").as_deref(), Some("interfaces bridge br0 vif 5"));
-        assert_eq!(p("eth0.100.200"), None);
-        assert_eq!(p("eth0.0"), None);
+        assert_eq!(
+            p("eth0.100.200").as_deref(),
+            Some("interfaces ethernet eth0 vif-s 100 vif-c 200")
+        );
+        assert_eq!(p("br0.100.200"), None);
         assert_eq!(p("eth0.4095"), None);
         assert_eq!(p("eth0.0100"), None);
         assert_eq!(p("wg0.1"), None);
-        assert_eq!(p("br0"), None);
-        assert_eq!(p("lo"), None);
+        assert_eq!(p("gre0"), None);
+        assert_eq!(p("eth0.1.2.3"), None);
+        for kind in InterfaceKind::CONFIGURABLE {
+            assert_ne!(kind.as_str(), "other");
+        }
     }
 
     #[test]

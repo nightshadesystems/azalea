@@ -23,15 +23,27 @@ export function AdminLabel({ up }: { up: boolean }) {
   );
 }
 
-const KIND_LABEL: Record<InterfaceKind, string> = {
-  ethernet: 'Ethernet',
-  vlan: 'VLAN',
-  bridge: 'Bridge',
-  bonding: 'Bond',
-  tunnel: 'Tunnel',
-  wireguard: 'WireGuard',
-  loopback: 'Loopback',
-  dummy: 'Dummy',
+export const KIND_LABEL: Record<InterfaceKind, string> = {
+  'bonding': 'Bond',
+  'bridge': 'Bridge',
+  'dummy': 'Dummy',
+  'ethernet': 'Ethernet',
+  'geneve': 'Geneve',
+  'l2tpv3': 'L2TPv3',
+  'loopback': 'Loopback',
+  'macsec': 'MACsec',
+  'openvpn': 'OpenVPN',
+  'wireguard': 'WireGuard',
+  'pppoe': 'PPPoE',
+  'pseudo-ethernet': 'MACVLAN',
+  'sstpc': 'SSTP Client',
+  'tunnel': 'Tunnel',
+  'virtual-ethernet': 'Virtual Ethernet',
+  'vti': 'VTI',
+  'vxlan': 'VXLAN',
+  'wireless': 'Wireless LAN',
+  'wwan': 'WWAN',
+  'vlan': 'VLAN',
   other: 'Other',
 };
 

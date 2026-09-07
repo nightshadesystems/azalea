@@ -309,9 +309,7 @@ fn editable_path(name: &str) -> Result<Vec<String>, ApiError> {
         return Err(OpError::NoSuchInterface(name.to_string()).into());
     }
     InterfaceKind::config_path(name).ok_or_else(|| {
-        ApiError::BadRequest(format!(
-            "{name}: only ethernet and VLAN interfaces can be edited"
-        ))
+        ApiError::BadRequest(format!("{name}: not an interface Azalea can configure"))
     })
 }
 
@@ -523,7 +521,7 @@ mod tests {
             ..Default::default()
         }));
         assert!(refused(InterfaceConfigChange {
-            interface: "br0".into(),
+            interface: "gre0".into(),
             set: vec![w("description x")],
             ..Default::default()
         }));

@@ -22,6 +22,9 @@ OpenSSL VyOS ships. Releasing is described in `docs/release.md`.
 - `src/azalea-vyos/` — VyOS op-mode backend (real + mock), parsers, fixtures
 - `src/azalea-common/` — shared types, settings loader
 - `web/` — Next.js static export (Nightshade Clarity, TypeScript)
+- `scripts/gen-vyos-schema.py` — turns vyos-1x's interface-definitions
+  into `web/lib/vyos-interfaces.generated.ts` (drives the interface
+  editors) and `src/azalea-vyos/schema/interfaces.json` (the mock's rules)
 - `packaging/` — cargo-deb config, systemd unit, `install.sh`
 - `design/` — Nightshade Systems design system export and the Azalea brand kit
 
@@ -33,6 +36,14 @@ OpenSSL VyOS ships. Releasing is described in `docs/release.md`.
 
 Open http://localhost:8080. `npm run dev` in `web/` proxies `/api/*` to
 port 8080 (override with `AZALEA_WEBD_URL`).
+
+The interface editors are generated from VyOS's own CLI definitions. To
+refresh them for a newer release:
+
+    git clone --depth 1 --branch <branch> https://github.com/vyos/vyos-1x
+    python3 scripts/gen-vyos-schema.py ./vyos-1x
+
+The generated files record the branch and commit they came from.
 
 ## On the router
 

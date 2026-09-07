@@ -75,15 +75,28 @@ export interface TlsInfo {
   fingerprint: string | null;
 }
 
+/** The `interfaces <type>` word, plus `vlan` for VIFs and `other` for the rest. */
 export type InterfaceKind =
-  | 'ethernet'
-  | 'vlan'
-  | 'bridge'
   | 'bonding'
-  | 'tunnel'
-  | 'wireguard'
-  | 'loopback'
+  | 'bridge'
   | 'dummy'
+  | 'ethernet'
+  | 'geneve'
+  | 'l2tpv3'
+  | 'loopback'
+  | 'macsec'
+  | 'openvpn'
+  | 'wireguard'
+  | 'pppoe'
+  | 'pseudo-ethernet'
+  | 'sstpc'
+  | 'tunnel'
+  | 'virtual-ethernet'
+  | 'vti'
+  | 'vxlan'
+  | 'wireless'
+  | 'wwan'
+  | 'vlan'
   | 'other';
 
 export interface InterfaceCounters {

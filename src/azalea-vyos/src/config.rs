@@ -242,9 +242,11 @@ impl ConfigBackend for VyosConfig {
 
 // ------------------------------------------------------------- tree
 
-/// In-memory edits on VyOS's JSON rendering, used by the mock and
-/// tested here so the shape the UI diffs against is pinned: a leaf is
-/// a string, a multi-value leaf a list, a valueless node `{}`.
+/// In-memory edits on the JSON shape `vyos.config.get_config_dict`
+/// returns (what the real backend reads), used by the mock and tested
+/// here so the shape the UI diffs against is pinned: a single-valued
+/// leaf is a string, a multi-valued leaf always a list, a valueless
+/// node `{}`.
 pub mod tree {
     use serde_json::{json, Map, Value};
 
@@ -320,16 +322,11 @@ pub mod tree {
             }
             Value::Array(values) => {
                 values.retain(|v| v != last);
-                match values.len() {
-                    0 => {
-                        *node = json!({});
-                        true
-                    }
-                    1 => {
-                        *node = values.remove(0);
-                        false
-                    }
-                    _ => false,
+                if values.is_empty() {
+                    *node = json!({});
+                    true
+                } else {
+                    false
                 }
             }
             Value::Object(children) => {
@@ -429,7 +426,7 @@ mod tests {
         assert_eq!(t["description"], "LAN");
         // Deleting one of several values, then the last.
         delete(&mut t, &p("address 10.0.0.1/24"));
-        assert_eq!(t["address"], "10.0.0.2/24");
+        assert_eq!(t["address"], json!(["10.0.0.2/24"]));
         delete(&mut t, &p("address 10.0.0.2/24"));
         assert!(get(&t, &p("address")).is_none());
         // Deleting a valueless node and a whole subtree.

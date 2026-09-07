@@ -8,7 +8,7 @@ import type { Interface, InterfaceKind } from '@/lib/types';
 import { Alert, Label } from '@/components/ds/misc';
 import { Button } from '@/components/ds/Button';
 import { Datagrid } from '@/components/ds/Datagrid';
-import { AdminLabel, KindLabel, OperLabel } from '@/components/status';
+import { AdminLabel, KindLabel, KIND_LABEL, OperLabel } from '@/components/status';
 import { DeleteInterfacesModal, InterfaceEditModal, type EditTarget } from '@/components/InterfaceEditModal';
 
 // Without the stream (next dev cannot proxy WebSockets) refetch instead.
@@ -30,8 +30,10 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
   const [notice, setNotice] = useState<{ text: string; detail?: string } | null>(null);
   // The datagrid owns its selection; keep its reset handy for after a delete.
   const clearSelection = useRef<() => void>(() => {});
-  // VLANs can be made and unmade; ethernet ports only edited.
-  const vlanPage = kinds.length === 1 && kinds[0] === 'vlan';
+  // One kind per page; everything but physical ports and `lo` can be made and unmade.
+  const kind = kinds.length === 1 ? kinds[0] : null;
+  const creatable = kind != null && kind !== 'ethernet' && kind !== 'loopback';
+  const kindLabel = kind ? KIND_LABEL[kind] : 'interface';
   const { live, connected } = useCounterStream();
   const admin = !!useSession()?.admin;
 
@@ -109,9 +111,9 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
             const needAdmin = !admin ? 'Needs an admin login' : null;
             return (
               <>
-                {vlanPage && (
-                  <Button sm icon="plus" disabled={!admin} title={needAdmin ?? 'Add a VLAN'} onClick={() => setEditing({ create: 'vlan' })}>
-                    Add VLAN
+                {creatable && (
+                  <Button sm icon="plus" disabled={!admin} title={needAdmin ?? `Add a ${kindLabel}`} onClick={() => setEditing({ create: kind! })}>
+                    Add {kindLabel}
                   </Button>
                 )}
                 <Button
@@ -123,13 +125,13 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
                 >
                   Edit
                 </Button>
-                {vlanPage && (
+                {creatable && (
                   <Button
                     sm
                     variant="danger-outline"
                     icon="trash"
                     disabled={names.length === 0 || !admin}
-                    title={needAdmin ?? (names.length ? `Delete ${names.join(', ')}` : 'Select VLANs to delete')}
+                    title={needAdmin ?? (names.length ? `Delete ${names.join(', ')}` : `Select ${kindLabel} interfaces to delete`)}
                     onClick={() => setDeleting(names)}
                   >
                     Delete
@@ -160,7 +162,7 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
           ]}
           rows={rows}
           pageSize={32}
-          placeholder="No interfaces of this type."
+          placeholder={creatable ? `No ${kindLabel} interfaces yet.` : 'No interfaces of this type.'}
         />
       )}
       <InterfaceEditModal target={editing} interfaces={interfaces || []} onClose={() => setEditing(null)} onSaved={saved} />

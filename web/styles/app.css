@@ -46,3 +46,29 @@
 .cfg-commands pre{margin:8px 0 0;padding:8px 12px;background:var(--cds-alias-object-container-background-shade);border-radius:var(--clr-base-border-radius-s);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-all}
 .cfg-title-name{font-family:var(--ns-font-mono);font-weight:500}
 .modal-body .alert{margin-bottom:12px}
+/* schema-driven editor: section list on the left, groups and tag lists on the right */
+.cfg-layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:0 24px;min-height:420px}
+.cfg-sections .clr-tabs-list{position:sticky;top:0}
+.cfg-sections .clr-tab-link{justify-content:space-between;padding:0 12px;font-size:13px;height:30px}
+.cfg-sections .clr-tab-link.cfg-section-off{color:var(--cds-alias-typography-color-200)}
+.cfg-sections .clr-tab-link .badge{margin-left:8px}
+.cfg-content{min-width:0}
+.cfg-group{border:1px solid var(--cds-alias-object-border-subtle);border-radius:var(--clr-base-border-radius-s);margin-top:16px}
+.cfg-group:first-child{margin-top:4px}
+.cfg-group-head{display:flex;align-items:center;gap:12px;padding:6px 8px 6px 4px;background:var(--cds-alias-object-container-background-shade)}
+.cfg-group-off .cfg-group-head{background:transparent}
+.cfg-group-toggle{all:unset;display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:2px 6px;color:var(--cds-alias-typography-color-450);font-weight:600;font-size:13px}
+.cfg-group-title{font-weight:600;font-size:13px;color:var(--cds-alias-typography-color-450);padding-left:6px}
+.cfg-group-toggle .cfg-group-title{padding-left:0}
+.cfg-group-count{font-size:11px;font-weight:500;color:var(--cds-alias-typography-color-300);background:var(--cds-alias-object-container-background);border:1px solid var(--cds-alias-object-border-subtle);border-radius:999px;padding:0 6px;margin-left:6px}
+.cfg-group-help{flex:1;font-size:12px;color:var(--cds-alias-typography-color-300);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfg-group-head .btn{margin-left:auto}
+.cfg-group-body{padding:4px 12px 12px}
+.cfg-group-body .cfg-grid .clr-form-control:nth-child(-n+2){margin-top:12px}
+.cfg-taglist>.cfg-group-body>.cfg-multi-add{margin-top:12px}
+.cfg-formats{display:block;margin-top:2px}
+.cfg-formats>span{display:block}
+.cfg-error{color:var(--cds-alias-status-danger)}
+.cfg-multi-row.cfg-bad{border-color:var(--cds-alias-status-danger)}
+.cfg-enum-multi{margin-top:4px}
+.modal-xl .modal-content{max-height:calc(100vh - 100px)}
