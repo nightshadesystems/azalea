@@ -49,6 +49,7 @@ fn get_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
         ("/api/interfaces/{name}", get(interface_detail)),
         ("/api/config/interfaces/{name}", get(interface_config)),
         ("/api/config/nat/{scope}", get(nat_config)),
+        ("/api/config/routing/{scope}", get(routing_config)),
         ("/api/stream", get(stream)),
     ]
 }
@@ -61,6 +62,7 @@ fn post_routes() -> Vec<(&'static str, MethodRouter<SharedState>)> {
         ("/api/logout", post(logout)),
         ("/api/config/interfaces", post(interface_config_change)),
         ("/api/config/nat", post(nat_config_change)),
+        ("/api/config/routing", post(routing_config_change)),
     ]
 }
 
@@ -438,6 +440,75 @@ async fn nat_config_change(
     Ok(Json(ConfigApplied { output }).into_response())
 }
 
+/// The `protocols <name>` subtrees the Routing pages edit. The Static,
+/// ARP and Multicast pages all work under `static`.
+const ROUTING_SCOPES: &[&str] = &[
+    "babel",
+    "bfd",
+    "bgp",
+    "eigrp",
+    "failover",
+    "igmp-proxy",
+    "isis",
+    "mpls",
+    "nhrp",
+    "openfabric",
+    "ospf",
+    "ospfv3",
+    "pim",
+    "pim6",
+    "rip",
+    "ripng",
+    "rpki",
+    "segment-routing",
+    "static",
+    "traffic-engineering",
+];
+
+fn routing_scope_path(scope: &str) -> Result<Vec<String>, ApiError> {
+    if !ROUTING_SCOPES.contains(&scope) {
+        return Err(ApiError::BadRequest(format!(
+            "{scope}: not a routing protocol Azalea configures"
+        )));
+    }
+    Ok(vec!["protocols".to_string(), scope.to_string()])
+}
+
+async fn routing_config(
+    _op: Operator,
+    State(state): State<SharedState>,
+    Path(scope): Path<String>,
+) -> Result<Response, ApiError> {
+    let path = routing_scope_path(&scope)?;
+    let config = state.config.subtree(&path).await?;
+    Ok(Json(ScopeConfig {
+        scope,
+        path,
+        config,
+    })
+    .into_response())
+}
+
+/// Unlike NAT, a routing change may name the protocol node itself: a
+/// `delete` with an empty path removes the whole protocol.
+async fn routing_config_change(
+    op: Operator,
+    State(state): State<SharedState>,
+    Json(change): Json<ScopeConfigChange>,
+) -> Result<Response, ApiError> {
+    let base = routing_scope_path(&change.scope)?;
+    let batch = batch_under(&base, &change.set, &change.delete, true)?;
+    tracing::info!(
+        username = %op.0.username,
+        scope = %change.scope,
+        set = batch.set.len(),
+        delete = batch.delete.len(),
+        "config change"
+    );
+    let output = state.config.apply(&batch).await?;
+    Ok(Json(ConfigApplied { output }).into_response())
+}
+
 async fn interface_config_change(
     op: Operator,
     State(state): State<SharedState>,
@@ -631,6 +702,21 @@ mod tests {
             batch_under(&base, &[], &[vec![]], false),
             Err(ApiError::BadRequest(_))
         ));
+    }
+
+    #[test]
+    fn routing_scopes_are_prefixed() {
+        let w = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let base = routing_scope_path("bgp").unwrap();
+        assert_eq!(base, w("protocols bgp"));
+        // The protocol node itself may go: that is how a protocol is removed.
+        let batch = batch_under(&base, &[w("system-as 65001")], &[vec![]], true).unwrap();
+        assert_eq!(batch.set[0].join(" "), "protocols bgp system-as 65001");
+        assert_eq!(batch.delete[0].join(" "), "protocols bgp");
+        assert_eq!(routing_scope_path("static").unwrap(), w("protocols static"));
+        assert!(routing_scope_path("protocols").is_err());
+        assert!(routing_scope_path("nat").is_err());
+        assert!(routing_scope_path("../bgp").is_err());
     }
 
     #[test]

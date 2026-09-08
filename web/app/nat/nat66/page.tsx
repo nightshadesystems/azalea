@@ -2,5 +2,5 @@
 import { NatPage } from '@/components/NatPage';
 
 export default function Page() {
-  return <NatPage scope="nat66" title="NAT66" />;
+  return <NatPage scope="nat66" />;
 }

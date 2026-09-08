@@ -87,3 +87,13 @@
 .cfg-page{padding:16px 20px}
 .cfg-page .cfg-layout{min-height:360px}
 .page-header .label{margin-right:4px}
+/* NAT pages: rule tables under a tab row */
+.nat-tabs{margin-bottom:12px}
+.nat-tabs .clr-tab-link .cfg-group-count{margin-left:2px}
+.datagrid-action-bar .nat-toggle{margin-right:auto;min-height:0}
+.datagrid-action-bar .nat-toggle label{font-size:12px}
+/* Routing pages: the Settings editor sits inline under the tab row */
+.routing-settings{display:flex;flex-direction:column;gap:12px}
+.routing-settings .cfg-layout{min-height:360px}
+.routing-save-bar{display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px solid var(--cds-alias-object-border-subtle)}
+.cfg-group-count-warn{color:var(--cds-alias-status-warning);border-color:var(--cds-alias-status-warning)}

@@ -1,157 +1,114 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Shell from '@/components/Shell';
 import { api, compareNames } from '@/lib/api';
 import { useSession } from '@/lib/session';
-import { useDetail } from '@/lib/detail';
 import type { ConfigApplied, Interface, ScopeConfig, ScopeConfigChange } from '@/lib/types';
 import { VYOS_ROOTS } from '@/lib/vyos-interfaces.generated';
-import { basicSchema, countLeaves } from '@/lib/basic-options';
-import { diffTree, isTree, validateTree, type CfgTree, type SchemaNode } from '@/lib/vyos-schema';
-import { Alert, Label } from '@/components/ds/misc';
+import { getIn, isTree, type CfgTree, type SchemaNode } from '@/lib/vyos-schema';
+import { NAT_SPECS, type NatScope, type RuleTab } from '@/lib/nat-tables';
+import { nounOf } from '@/lib/config-tables';
+import { Alert } from '@/components/ds/misc';
 import { Button } from '@/components/ds/Button';
-import { SchemaEditor } from '@/components/SchemaEditor';
+import { Checkbox } from '@/components/ds/forms';
+import { Datagrid } from '@/components/ds/Datagrid';
+import { Tabs } from '@/components/ds/Tabs';
+import { DeleteRulesModal, RuleEditModal, type RuleTarget } from '@/components/RuleEditModal';
 
-export type NatScope = 'nat44' | 'nat64' | 'nat66' | 'cgnat';
+/** The schema node each scope edits. */
+function scopeSchema(scope: NatScope): SchemaNode | undefined {
+  const nat = VYOS_ROOTS['nat'];
+  if (scope === 'nat44') return nat;
+  if (scope === 'cgnat') return nat?.children?.find((c) => c.name === 'cgnat');
+  return VYOS_ROOTS[scope];
+}
 
-/** The schema node each page edits, and what counts as Basic there. */
-const SCOPES: Record<NatScope, { schema: () => SchemaNode | undefined; basic: string[]; intro: string }> = {
-  nat44: {
-    // `nat` minus `cgnat`, which has its own page.
-    schema: () => {
-      const nat = VYOS_ROOTS['nat'];
-      return nat && { ...nat, children: (nat.children ?? []).filter((c) => c.name !== 'cgnat') };
-    },
-    basic: [
-      'source.rule.description',
-      'source.rule.disable',
-      'source.rule.outbound-interface.name',
-      'source.rule.source.address',
-      'source.rule.source.port',
-      'source.rule.destination.address',
-      'source.rule.destination.port',
-      'source.rule.protocol',
-      'source.rule.translation.address',
-      'source.rule.translation.port',
-      'source.rule.exclude',
-      'destination.rule.description',
-      'destination.rule.disable',
-      'destination.rule.inbound-interface.name',
-      'destination.rule.source.address',
-      'destination.rule.source.port',
-      'destination.rule.destination.address',
-      'destination.rule.destination.port',
-      'destination.rule.protocol',
-      'destination.rule.translation.address',
-      'destination.rule.translation.port',
-      'destination.rule.exclude',
-      'static.rule.*',
-    ],
-    intro: 'IPv4 source (masquerade, SNAT), destination (port forwarding, DNAT) and static one-to-one rules.',
-  },
-  nat64: {
-    schema: () => VYOS_ROOTS['nat64'],
-    basic: ['*'],
-    intro: 'Translate IPv6-only clients to IPv4: a source prefix (usually 64:ff9b::/96) and the IPv4 pool to map it onto.',
-  },
-  nat66: {
-    schema: () => VYOS_ROOTS['nat66'],
-    basic: [
-      'source.rule.description',
-      'source.rule.disable',
-      'source.rule.outbound-interface.name',
-      'source.rule.source.prefix',
-      'source.rule.destination.prefix',
-      'source.rule.translation.address',
-      'source.rule.exclude',
-      'destination.rule.description',
-      'destination.rule.disable',
-      'destination.rule.inbound-interface.name',
-      'destination.rule.source.address',
-      'destination.rule.destination.address',
-      'destination.rule.translation.address',
-      'destination.rule.exclude',
-    ],
-    intro: 'IPv6 prefix translation (NPTv6): source and destination rules rewriting prefixes between networks.',
-  },
-  cgnat: {
-    schema: () => VYOS_ROOTS['nat']?.children?.find((c) => c.name === 'cgnat'),
-    basic: ['*'],
-    intro: 'Carrier-grade NAT: internal pools of subscriber addresses mapped onto external pools with per-user port allocations.',
-  },
-};
+/** Walk a schema node down a path of child names. */
+function schemaAt(node: SchemaNode | undefined, path: string[]): SchemaNode | undefined {
+  let n = node;
+  for (const name of path) n = n?.children?.find((c) => c.name === name);
+  return n;
+}
+
+interface Row {
+  key: string;
+  entry: CfgTree;
+}
 
 export interface NatPageProps {
   scope: NatScope;
-  title: string;
 }
 
-export function NatPage({ scope, title }: NatPageProps) {
+export function NatPage({ scope }: NatPageProps) {
+  const spec = NAT_SPECS[scope];
   const [loaded, setLoaded] = useState<ScopeConfig | null>(null);
-  const [tree, setTree] = useState<CfgTree>({});
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ text: string; detail?: string } | null>(null);
+  const [tabId, setTabId] = useState(spec.tabs[0]!.id);
+  const [editing, setEditing] = useState<RuleTarget | null>(null);
+  const [deleting, setDeleting] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const clearSelection = useRef<() => void>(() => {});
   const admin = !!useSession()?.admin;
-  const detail = useDetail();
-  const spec = SCOPES[scope];
 
   const load = useCallback(() => {
-    setError(null);
     api<ScopeConfig>(`/api/config/nat/${scope}`)
       .then((c) => {
         setLoaded(c);
-        setTree(isTree(c.config) ? c.config : {});
+        setError(null);
       })
       .catch((e: Error) => setError(e.message));
     api<Interface[]>('/api/interfaces').then(setInterfaces).catch(() => {});
   }, [scope]);
   useEffect(load, [load]);
 
-  const fullSchema = useMemo(() => spec.schema(), [spec]);
-  const schema = useMemo(() => (fullSchema && detail === 'basic' ? basicSchema(fullSchema, spec.basic) : fullSchema), [fullSchema, detail, spec]);
-  const hidden = fullSchema && schema ? countLeaves(fullSchema) - countLeaves(schema) : 0;
-  const complaints = useMemo(() => (schema ? validateTree(schema, tree) : []), [schema, tree]);
-  const changes = useMemo(() => (schema && loaded ? diffTree(schema, loaded.config, tree) : { set: [], delete: [] }), [schema, loaded, tree]);
-  const nChanges = changes.set.length + changes.delete.length;
+  const tab: RuleTab = spec.tabs.find((t) => t.id === tabId) ?? spec.tabs[0]!;
+  const config: CfgTree = loaded && isTree(loaded.config) ? loaded.config : {};
+  const entriesOf = (t: RuleTab): CfgTree => {
+    const n = getIn(config, t.path);
+    return isTree(n) ? n : {};
+  };
+  const entries = entriesOf(tab);
+  const rows: Row[] = useMemo(() => {
+    const compare = tab.numeric ? (a: string, b: string) => Number(a) - Number(b) : compareNames;
+    return Object.keys(entries)
+      .sort(compare)
+      .map((key) => ({ key, entry: isTree(entries[key]) ? (entries[key] as CfgTree) : {} }));
+  }, [entries, tab.numeric]);
+  const tagSchema = schemaAt(scopeSchema(scope), tab.path);
   const ctx = useMemo(() => ({ interfaces: interfaces.map((i) => i.name).sort(compareNames) }), [interfaces]);
 
-  const save = async () => {
-    if (!loaded || nChanges === 0 || complaints.length > 0) return;
-    setSaving(true);
-    setNotice(null);
+  const saved = (what: string, output: string) => {
+    setEditing(null);
+    setDeleting([]);
+    clearSelection.current();
+    setNotice({ text: `${what} committed and saved.`, detail: output.trim() || undefined });
+    load();
+  };
+
+  // CGNAT's one top-level switch lives beside the tables.
+  const logAllocation = getIn(config, ['log-allocation']) !== undefined;
+  const toggleLogAllocation = async (on: boolean) => {
+    setBusy(true);
     try {
-      const body: ScopeConfigChange = { scope, set: changes.set, delete: changes.delete };
+      const body: ScopeConfigChange = { scope, set: on ? [['log-allocation']] : [], delete: on ? [] : [['log-allocation']] };
       const applied = await api<ConfigApplied>('/api/config/nat', { method: 'POST', body: JSON.stringify(body) });
-      setNotice({ text: `${title} committed and saved.`, detail: applied.output.trim() || undefined });
-      load();
+      saved(`Log allocation ${on ? 'on' : 'off'}`, applied.output);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   };
 
+  const noun = nounOf(tab.keyLabel);
   return (
     <Shell>
       <div className="page-header">
-        <h2>{title}</h2>
-        {nChanges > 0 && <Label status="warning">{nChanges} unsaved</Label>}
-        <Button onClick={() => loaded && setTree(isTree(loaded.config) ? loaded.config : {})} disabled={nChanges === 0 || saving}>
-          Discard
-        </Button>
-        <Button
-          variant="primary"
-          onClick={save}
-          loading={saving}
-          disabled={!admin || !loaded || nChanges === 0 || complaints.length > 0 || saving}
-          title={!admin ? 'Saving needs an admin login' : complaints.length ? `${complaints.length} value${complaints.length === 1 ? '' : 's'} to fix` : 'Commit and save'}
-        >
-          Save
-        </Button>
+        <h2>{spec.title}</h2>
       </div>
-      <p className="dim" style={{ margin: '-8px 0 16px', fontSize: 13 }}>
+      <p className="dim" style={{ margin: '-8px 0 12px', fontSize: 13 }}>
         {spec.intro}
       </p>
       {error && (
@@ -165,15 +122,90 @@ export function NatPage({ scope, title }: NatPageProps) {
           {notice.detail && <pre style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap', fontSize: 12 }}>{notice.detail}</pre>}
         </Alert>
       )}
+      <Tabs
+        className="nat-tabs"
+        tabs={spec.tabs.map((t) => ({
+          id: t.id,
+          label: t.label,
+          badge: <span className="cfg-group-count">{Object.keys(entriesOf(t)).length}</span>,
+        }))}
+        active={tab.id}
+        onChange={(id) => {
+          setTabId(id);
+          clearSelection.current();
+        }}
+      />
       {!loaded && !error && (
         <div className="page-loading">
           <span className="spinner spinner-md"></span>Loading…
         </div>
       )}
-      {loaded && schema && (
-        <div className="card cfg-page">
-          <SchemaEditor schema={schema} hidden={hidden} tree={tree} onChange={setTree} path={loaded.path} changes={changes} complaints={complaints} ctx={ctx} />
-        </div>
+      {loaded && (
+        <Datagrid<Row>
+          key={tab.id}
+          selectable
+          rowKey={(r) => r.key}
+          onRefresh={load}
+          actionBar={({ selected, clear }) => {
+            clearSelection.current = clear;
+            const keys = [...selected].map(String);
+            const one = keys.length === 1 ? keys[0]! : null;
+            const needAdmin = !admin ? 'Needs an admin login' : null;
+            return (
+              <>
+                {scope === 'cgnat' && (
+                  <Checkbox
+                    label="Log allocation"
+                    checked={logAllocation}
+                    disabled={!admin || busy}
+                    onChange={(e) => toggleLogAllocation(e.target.checked)}
+                    className="nat-toggle"
+                  />
+                )}
+                <Button sm icon="plus" disabled={!admin} title={needAdmin ?? `Add a ${noun}`} onClick={() => setEditing({ create: true })}>
+                  Add {noun}
+                </Button>
+                <Button sm icon="pencil" disabled={!one || !admin} title={needAdmin ?? (one ? `Edit ${noun} ${one}` : `Select one ${noun} to edit`)} onClick={() => one && setEditing({ key: one })}>
+                  Edit
+                </Button>
+                <Button
+                  sm
+                  variant="danger-outline"
+                  icon="trash"
+                  disabled={keys.length === 0 || !admin}
+                  title={needAdmin ?? (keys.length ? `Delete ${keys.join(', ')}` : `Select ${noun}s to delete`)}
+                  onClick={() => setDeleting(keys)}
+                >
+                  Delete
+                </Button>
+              </>
+            );
+          }}
+          columns={[
+            { key: 'key', label: tab.keyLabel, render: (r) => <span className="cell-mono">{r.key}</span> },
+            ...tab.columns.map((c) => ({ key: c.key, label: c.label, render: (r: Row) => c.render(r.entry) })),
+          ]}
+          rows={rows}
+          pageSize={50}
+          placeholder={`No ${tab.label.toLowerCase()} ${noun}s yet.`}
+        />
+      )}
+      {loaded && tagSchema && (
+        <>
+          <RuleEditModal
+            target={editing}
+            endpoint="/api/config/nat"
+            scope={scope}
+            scopePath={loaded.path}
+            tab={tab}
+            schema={tagSchema}
+            entries={entries}
+            ctx={ctx}
+            onClose={() => setEditing(null)}
+            onSaved={(key, output) => saved(`${tab.keyLabel} ${key}`, output)}
+          />
+          <DeleteRulesModal endpoint="/api/config/nat" scope={scope} tab={tab} keys={deleting} onClose={() => setDeleting([])} onDeleted={(keys, output) => saved(`Deleted ${keys.join(', ')}`, output)} />
+        </>
       )}
     </Shell>
   );

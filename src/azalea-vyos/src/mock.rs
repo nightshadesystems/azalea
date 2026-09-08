@@ -16,9 +16,9 @@ use serde_json::{json, Value};
 use crate::config::{tree, ConfigBackend, ConfigBatch, ConfigError};
 use crate::op::{OpBackend, OpError};
 
-/// Node kinds of every `interfaces <type>` tree, generated from vyos-1x
-/// by scripts/gen-vyos-schema.py: `k` node/tag/leaf, `m` multi, `v`
-/// valueless, `c` children.
+/// Node kinds of every tree Azalea edits (`interfaces`, the NAT roots,
+/// `protocols`), generated from vyos-1x by scripts/gen-vyos-schema.py:
+/// `k` node/tag/leaf, `m` multi, `v` valueless, `c` children.
 const SCHEMA_JSON: &str = include_str!("../schema/interfaces.json");
 
 fn schema() -> &'static Value {
@@ -107,7 +107,7 @@ fn check_against_schema(node: &Value, cfg: &Value, at: &str) -> Result<(), Strin
 pub struct MockOp {
     started: Instant,
     /// The whole config tree Azalea edits (`interfaces`, `nat`, `nat64`,
-    /// `nat66`), in VyOS's JSON rendering.
+    /// `nat66`, `protocols`), in VyOS's JSON rendering.
     config: Mutex<Value>,
 }
 
@@ -144,10 +144,12 @@ impl MockOp {
         }
     }
 
-    /// The mock router's config: one of every interface, and a little NAT.
+    /// The mock router's config: one of every interface, a little NAT
+    /// and a small routing setup.
     fn initial_config() -> Value {
         json!({
             "interfaces": Self::initial_interfaces(),
+            "protocols": Self::initial_protocols(),
             "nat": {
                 "source": { "rule": { "100": {
                     "description": "Masquerade LAN", "outbound-interface": { "name": "eth0" },
@@ -173,6 +175,67 @@ impl MockOp {
                 "description": "NPTv6 to ISP prefix", "outbound-interface": { "name": "eth0" },
                 "source": { "prefix": "fc00:1::/64" }, "translation": { "address": "2001:db8:1::/64" }
             } } } }
+        })
+    }
+
+    /// `protocols { ... }`: static routes, an eBGP/iBGP pair, OSPF on the
+    /// LAN, and a taste of the smaller protocols.
+    fn initial_protocols() -> Value {
+        json!({
+            "static": {
+                "route": {
+                    "0.0.0.0/0": { "description": "Default via ISP", "next-hop": { "203.0.113.1": { "distance": "1" } } },
+                    "10.50.0.0/16": { "description": "Datacenter via LAG", "next-hop": { "10.20.0.2": { "interface": "bond0" } } },
+                    "192.0.2.0/24": { "description": "Bogon sink", "blackhole": { "distance": "254" } }
+                },
+                "route6": { "::/0": { "next-hop": { "2001:db8::1": {} } } },
+                "table": { "100": { "description": "Guest egress", "route": { "0.0.0.0/0": { "next-hop": { "203.0.113.1": {} } } } } },
+                "arp": { "interface": { "eth1": { "address": { "192.168.1.50": { "description": "Printer", "mac": "52:54:00:aa:bb:50" } } } } },
+                "multicast": { "route": { "10.60.0.0/24": { "next-hop": { "10.20.0.2": { "distance": "10" } } } } },
+                "neighbor-proxy": { "arp": { "192.168.1.200": { "interface": ["eth1"] } } }
+            },
+            "bgp": {
+                "system-as": "65001",
+                "parameters": { "router-id": "10.0.0.1", "log-neighbor-changes": {} },
+                "address-family": { "ipv4-unicast": { "network": { "10.10.0.0/24": {} }, "redistribute": { "connected": {} } } },
+                "peer-group": { "ISP": { "description": "Upstream", "remote-as": "65000" } },
+                "neighbor": {
+                    "203.0.113.1": {
+                        "description": "ISP primary", "peer-group": "ISP",
+                        "address-family": { "ipv4-unicast": { "soft-reconfiguration": { "inbound": {} } } }
+                    },
+                    "10.20.0.2": {
+                        "description": "DC iBGP", "remote-as": "65001", "update-source": "10.0.0.1",
+                        "address-family": { "ipv4-unicast": { "nexthop-self": {} } }
+                    }
+                }
+            },
+            "ospf": {
+                "parameters": { "router-id": "10.0.0.1" },
+                "area": { "0": { "network": ["10.10.0.0/24", "10.20.0.0/30"] } },
+                "interface": { "eth1": { "passive": {} }, "bond0": { "cost": "10", "network": "point-to-point", "bfd": {} } },
+                "redistribute": { "connected": { "metric-type": "2" } }
+            },
+            "ospfv3": {
+                "parameters": { "router-id": "10.0.0.1" },
+                "area": { "0.0.0.0": {} },
+                "interface": { "eth1": { "area": "0.0.0.0", "passive": {} } }
+            },
+            "bfd": {
+                "peer": { "10.20.0.2": { "interval": { "receive": "300", "transmit": "300", "multiplier": "3" } } },
+                "profile": { "fast": { "interval": { "receive": "100", "transmit": "100", "multiplier": "3" } } }
+            },
+            "rip": {
+                "network": ["192.168.100.0/24"],
+                "interface": { "eth1.100": { "split-horizon": { "poison-reverse": {} } } },
+                "passive-interface": ["eth0"]
+            },
+            "rpki": { "cache": { "rpki.example.net": { "port": "3323", "preference": "1" } }, "polling-period": "300" },
+            "pim": {
+                "interface": { "eth1": { "igmp": { "version": "3" } } },
+                "rp": { "address": { "10.0.0.1": { "group": ["239.0.0.0/8"] } } }
+            },
+            "igmp-proxy": { "interface": { "eth0": { "role": "upstream", "threshold": "1" }, "eth1": { "role": "downstream" } } }
         })
     }
 
@@ -716,6 +779,20 @@ mod tests {
             single
         );
         assert_eq!(c("nat66 destination rule 1 log").unwrap(), node);
+        assert_eq!(c("protocols bgp").unwrap(), node);
+        assert_eq!(c("protocols bgp system-as 65001").unwrap(), single);
+        assert_eq!(
+            c("protocols bgp neighbor 10.0.0.2 remote-as 65001").unwrap(),
+            single
+        );
+        assert_eq!(
+            c("protocols static route 0.0.0.0/0 next-hop 10.0.0.1 distance 5").unwrap(),
+            single
+        );
+        assert_eq!(c("protocols ospf area 0 network 10.0.0.0/8").unwrap(), multi);
+        assert_eq!(c("protocols rip passive-interface eth0").unwrap(), multi);
+        assert!(c("protocols openfabric domain core log-adjacency-changes").is_ok());
+        assert!(c("protocols nonsense").is_err());
         assert!(c("interfaces ethernet eth0 nonsense x").is_err());
         assert!(c("interfaces ethernet eth0 description").is_err());
         assert!(c("interfaces ethernet eth0 disable yes").is_err());

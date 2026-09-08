@@ -16,12 +16,40 @@ interface Tab extends NavItem {
 // Top tab bar. Add a tab here and a SIDE_NAV entry for its left nav.
 const TABS: Tab[] = [
   { label: 'Dashboard', href: '/dashboard/' },
+  { label: 'Routing', href: '/routing/static/', root: '/routing' },
   { label: 'Interfaces', href: '/interfaces/bonding/', root: '/interfaces' },
   { label: 'NAT', href: '/nat/nat44/', root: '/nat' },
 ];
 
 // Left-hand navigation per tab.
 const SIDE_NAV: Record<string, VerticalNavGroup> = {
+  '/routing': {
+    label: 'Routing',
+    items: [
+      { id: '/routing/static/', label: 'Static', icon: 'map' },
+      { id: '/routing/arp/', label: 'ARP', icon: 'tag' },
+      { id: '/routing/multicast/', label: 'Multicast', icon: 'share' },
+      { id: '/routing/bgp/', label: 'BGP', icon: 'world' },
+      { id: '/routing/ospf/', label: 'OSPF', icon: 'nodes' },
+      { id: '/routing/ospfv3/', label: 'OSPFv3', icon: 'network-globe' },
+      { id: '/routing/isis/', label: 'IS-IS', icon: 'cluster' },
+      { id: '/routing/openfabric/', label: 'OpenFabric', icon: 'layers' },
+      { id: '/routing/rip/', label: 'RIP', icon: 'compass' },
+      { id: '/routing/ripng/', label: 'RIPng', icon: 'crosshairs' },
+      { id: '/routing/babel/', label: 'Babel', icon: 'organization' },
+      { id: '/routing/eigrp/', label: 'EIGRP', icon: 'tree-view' },
+      { id: '/routing/bfd/', label: 'BFD', icon: 'bolt' },
+      { id: '/routing/mpls/', label: 'MPLS', icon: 'tags' },
+      { id: '/routing/segment-routing/', label: 'Segment Routing', icon: 'flag' },
+      { id: '/routing/traffic-engineering/', label: 'Traffic Engineering', icon: 'balance' },
+      { id: '/routing/pim/', label: 'PIM', icon: 'router' },
+      { id: '/routing/pim6/', label: 'PIM6', icon: 'cloud-network' },
+      { id: '/routing/igmp-proxy/', label: 'IGMP Proxy', icon: 'two-way-arrows' },
+      { id: '/routing/rpki/', label: 'RPKI', icon: 'shield-check' },
+      { id: '/routing/failover/', label: 'Failover', icon: 'repeat' },
+      { id: '/routing/nhrp/', label: 'NHRP', icon: 'target' },
+    ],
+  },
   '/nat': {
     label: 'NAT',
     items: [
