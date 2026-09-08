@@ -3,7 +3,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api, compareNames } from '@/lib/api';
 import type { ConfigApplied, Interface, InterfaceConfig, InterfaceConfigChange, InterfaceKind } from '@/lib/types';
 import { VYOS_INTERFACES } from '@/lib/vyos-interfaces.generated';
-import { diffTree, isTree, placeholderFor, validateTree, validateValue, type CfgTree, type Changes, type SchemaNode } from '@/lib/vyos-schema';
+import { useTrain, type VyosTrain } from '@/lib/train';
+import { diffTree, forTrain, isTree, placeholderFor, validateTree, validateValue, type CfgTree, type Changes, type SchemaNode } from '@/lib/vyos-schema';
 import { Modal } from '@/components/ds/Modal';
 import { Button } from '@/components/ds/Button';
 import { FormField, Input, Select } from '@/components/ds/forms';
@@ -30,10 +31,10 @@ export interface InterfaceEditModalProps {
 /** Kinds a `vif` can hang off, in the order offered. */
 const VLAN_PARENTS: InterfaceKind[] = ['ethernet', 'bonding', 'bridge', 'pseudo-ethernet', 'virtual-ethernet', 'wireless'];
 
-/** The schema node a config path lands on: the type's node, or its `vif`/`vif-c` child. */
-function schemaAt(path: string[]): SchemaNode | undefined {
+/** The schema node a config path lands on, as the router's release has it: the type's node, or its `vif`/`vif-c` child. */
+function schemaAt(path: string[], train: VyosTrain): SchemaNode | undefined {
   const type = path[1];
-  let node: SchemaNode | undefined = type ? VYOS_INTERFACES[type] : undefined;
+  let node: SchemaNode | undefined = type ? forTrain(VYOS_INTERFACES[type], train) : undefined;
   // path: interfaces <type> <name> [vif <id> | vif-s <id> vif-c <id>]
   for (let i = 3; i < path.length && node; i += 2) {
     const word = path[i];
@@ -55,6 +56,7 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
   const [parent, setParent] = useState('');
   const [vlanId, setVlanId] = useState('');
   const detail = useDetail();
+  const train = useTrain();
 
   const parents = useMemo(
     () => interfaces.filter((i) => VLAN_PARENTS.includes(i.kind)).sort((a, b) => compareNames(a.name, b.name)),
@@ -78,7 +80,7 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
     api<InterfaceConfig>(`/api/config/interfaces/${encodeURIComponent(target.name)}`)
       .then((c) => {
         if (cancelled) return;
-        if (!schemaAt(c.path)) {
+        if (!schemaAt(c.path, train)) {
           setLoadError(`${c.name}: no schema for ${c.path.join(' ')}.`);
           return;
         }
@@ -104,16 +106,16 @@ export function InterfaceEditModal({ target, interfaces, onClose, onSaved }: Int
   // The schema does not wait for a name: a new VLAN edits its parent
   // type's `vif` node, any other new interface its type's node.
   const fullSchema = useMemo(() => {
-    if (!creating) return path.length ? schemaAt(path) : undefined;
-    if (createKind === 'vlan') return parentRow ? schemaAt(['interfaces', parentRow.kind, parentRow.name, 'vif', '0']) : undefined;
-    return VYOS_INTERFACES[createKind!];
-  }, [creating, createKind, path, parentRow]);
+    if (!creating) return path.length ? schemaAt(path, train) : undefined;
+    if (createKind === 'vlan') return parentRow ? schemaAt(['interfaces', parentRow.kind, parentRow.name, 'vif', '0'], train) : undefined;
+    return forTrain(VYOS_INTERFACES[createKind!], train);
+  }, [creating, createKind, path, parentRow, train]);
   const kind: InterfaceKind = createKind ?? config?.kind ?? 'other';
   // Basic trims the schema; the diff and validation walk the trimmed
   // tree, so hidden options are neither shown nor touched.
   const schema = useMemo(() => (fullSchema && detail === 'basic' ? basicSchema(fullSchema, basicRulesFor(kind)) : fullSchema), [fullSchema, detail, kind]);
   const hidden = fullSchema && schema ? countLeaves(fullSchema) - countLeaves(schema) : 0;
-  const typeNode = createKind && createKind !== 'vlan' ? VYOS_INTERFACES[createKind] : undefined;
+  const typeNode = createKind && createKind !== 'vlan' ? forTrain(VYOS_INTERFACES[createKind], train) : undefined;
 
   const createError = useMemo(() => {
     if (!creating) return null;

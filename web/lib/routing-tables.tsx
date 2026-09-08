@@ -36,7 +36,7 @@ export interface RoutingSpec {
   scope: string;
   title: string;
   intro: string;
-  /** A caveat shown under the intro (a protocol only rolling builds have). */
+  /** A caveat shown under the intro. */
   note?: string;
   /** Tag nodes shown as tables; paths relative to the scope node. */
   tables: RuleTab[];
@@ -168,8 +168,6 @@ const OSPF_INTERFACE_BASIC = ['area', 'cost', 'network', 'passive', 'passive.dis
 
 // ---------------------------------------------------------------- specs
 
-const ROLLING_ONLY = 'Only rolling builds of VyOS have this protocol; the 1.5 (circinus) branch will refuse the commit.';
-
 const table = (id: string, label: string, path: string[], keyLabel: string, columns: RuleColumn[], basic: string[] = ['*'], numeric = false): RuleTab => ({
   id,
   label,
@@ -187,7 +185,7 @@ export const ROUTING_SPECS: Record<RoutingSlug, RoutingSpec> = {
     title: 'Static routes',
     intro: 'Fixed IPv4 and IPv6 routes with next-hop addresses or interfaces, blackhole and reject sinks, and extra routing tables for policy routing.',
     tablesFirst: true,
-    omit: ['arp', 'multicast', 'neighbor-proxy'],
+    omit: ['arp', 'multicast', 'mroute', 'neighbor-proxy'],
     tables: [
       table('route', 'IPv4 routes', ['route'], 'Route', [description, nextHops], ROUTE_BASIC),
       table('route6', 'IPv6 routes', ['route6'], 'Route', [description, nextHops], [...ROUTE_BASIC, 'next-hop.segments', 'interface.segments']),
@@ -215,9 +213,14 @@ export const ROUTING_SPECS: Record<RoutingSlug, RoutingSpec> = {
     title: 'Multicast routes',
     intro: 'Static routes into the multicast RIB, used for reverse-path forwarding checks: by next-hop address or by interface.',
     tables: [
+      // 1.4 and 1.5: `static multicast route` / `interface-route`; rolling folded both into `static mroute`.
       table('route', 'Routes', ['multicast', 'route'], 'Source prefix', [keysCol('next-hop', 'Next hops', (k, e) => k + (v(e, 'distance') ? ` (${v(e, 'distance')})` : ''))]),
       table('interface-route', 'Interface routes', ['multicast', 'interface-route'], 'Source prefix', [
         keysCol('next-hop-interface', 'Interfaces', (k, e) => k + (v(e, 'distance') ? ` (${v(e, 'distance')})` : '')),
+      ]),
+      table('mroute', 'Routes', ['mroute'], 'Source prefix', [
+        keysCol('next-hop', 'Next hops', (k, e) => k + (v(e, 'distance') ? ` (${v(e, 'distance')})` : '')),
+        keysCol('interface', 'Interfaces', (k, e) => k + (v(e, 'distance') ? ` (${v(e, 'distance')})` : '')),
       ]),
     ],
     basic: ['*'],
@@ -352,7 +355,6 @@ export const ROUTING_SPECS: Record<RoutingSlug, RoutingSpec> = {
     scope: 'openfabric',
     title: 'OpenFabric',
     intro: 'Link-state routing for spine-leaf fabrics (FRR fabricd): one NET for the router, then one domain with the interfaces that take part.',
-    note: ROLLING_ONLY,
     tables: [
       table(
         'domain',
@@ -463,7 +465,6 @@ export const ROUTING_SPECS: Record<RoutingSlug, RoutingSpec> = {
     scope: 'traffic-engineering',
     title: 'Traffic engineering',
     intro: 'Link parameters advertised by the IGPs for MPLS-TE: per-interface metric and bandwidth, and the administrative groups interfaces belong to.',
-    note: ROLLING_ONLY,
     tablesFirst: true,
     tables: [
       table('interface', 'Interfaces', ['interface'], 'Interface', [col('metric', 'TE metric'), col('max-bandwidth', 'Max bandwidth'), col('max-reservable-bandwidth', 'Max reservable'), col('admin-group', 'Admin groups')]),

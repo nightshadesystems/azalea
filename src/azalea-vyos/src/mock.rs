@@ -18,25 +18,55 @@ use crate::op::{OpBackend, OpError};
 
 /// Node kinds of every tree Azalea edits (`interfaces`, the NAT roots,
 /// `protocols`), generated from vyos-1x by scripts/gen-vyos-schema.py:
-/// `k` node/tag/leaf, `m` multi, `v` valueless, `c` children.
+/// `k` node/tag/leaf, `m` multi, `v` valueless, `c` children, `o` the
+/// release trains that have the node (absent: all of them), `a` older
+/// variants of a node whose kind changed between trains.
 const SCHEMA_JSON: &str = include_str!("../schema/interfaces.json");
+
+/// The release trains the schema knows, oldest first.
+pub const TRAINS: &[&str] = &["sagitta", "circinus", "rolling"];
+
+/// Whether a schema entry (or one of its variants) exists on `train`;
+/// the variant that does.
+fn on_train<'a>(entry: &'a Value, train: &str) -> Option<&'a Value> {
+    let has = |e: &Value| {
+        e.get("o")
+            .and_then(Value::as_array)
+            .is_none_or(|o| o.iter().any(|t| t == train))
+    };
+    if has(entry) {
+        return Some(entry);
+    }
+    entry
+        .get("a")
+        .and_then(Value::as_array)
+        .and_then(|alts| alts.iter().find(|a| has(a)))
+}
 
 fn schema() -> &'static Value {
     static SCHEMA: OnceLock<Value> = OnceLock::new();
     SCHEMA.get_or_init(|| serde_json::from_str(SCHEMA_JSON).expect("generated schema parses"))
 }
 
-/// What `set <path>` means, per the schema: the leaf kind of the last
-/// word, or why VyOS would refuse the path. `path` is the full config
-/// path (`interfaces ethernet eth0 mtu 1500`, `nat source rule 10 …`).
-pub fn classify(path: &[String]) -> Result<tree::Leaf, String> {
+/// What `set <path>` means, per the schema as release `train` has it:
+/// the leaf kind of the last word, or why VyOS would refuse the path.
+/// `path` is the full config path (`interfaces ethernet eth0 mtu 1500`,
+/// `nat source rule 10 …`).
+pub fn classify(path: &[String], train: &str) -> Result<tree::Leaf, String> {
     let bad = || format!("Configuration path: [{}] is not valid", path.join(" "));
     let mut words = path.iter();
     let root = words.next().ok_or_else(bad)?;
-    let mut node = schema()["roots"].get(root).ok_or_else(bad)?;
+    let mut node = schema()["roots"]
+        .get(root)
+        .and_then(|n| on_train(n, train))
+        .ok_or_else(bad)?;
     let mut leaf = tree::Leaf::Node;
     while let Some(word) = words.next() {
-        let child = node.get("c").and_then(|c| c.get(word)).ok_or_else(bad)?;
+        let child = node
+            .get("c")
+            .and_then(|c| c.get(word))
+            .and_then(|c| on_train(c, train))
+            .ok_or_else(bad)?;
         node = child;
         match child["k"].as_str() {
             Some("t") => {
@@ -77,10 +107,10 @@ pub fn classify(path: &[String]) -> Result<tree::Leaf, String> {
     Ok(leaf)
 }
 
-/// Every key in `cfg` exists in the schema under `node` (tag keys are
-/// skipped). Keeps the sample config honest.
+/// Every key in `cfg` exists in the schema under `node` for `train`
+/// (tag keys are skipped). Keeps the sample config honest.
 #[cfg(test)]
-fn check_against_schema(node: &Value, cfg: &Value, at: &str) -> Result<(), String> {
+fn check_against_schema(node: &Value, cfg: &Value, at: &str, train: &str) -> Result<(), String> {
     let Value::Object(map) = cfg else {
         return Ok(());
     };
@@ -88,24 +118,56 @@ fn check_against_schema(node: &Value, cfg: &Value, at: &str) -> Result<(), Strin
         let child = node
             .get("c")
             .and_then(|c| c.get(key))
-            .ok_or_else(|| format!("{at} {key}: not in schema"))?;
+            .and_then(|c| on_train(c, train))
+            .ok_or_else(|| format!("{at} {key}: not in the {train} schema"))?;
         match child["k"].as_str() {
             Some("t") => {
                 if let Value::Object(entries) = child_cfg {
                     for (tag, entry) in entries {
-                        check_against_schema(child, entry, &format!("{at} {key} {tag}"))?;
+                        check_against_schema(child, entry, &format!("{at} {key} {tag}"), train)?;
                     }
                 }
             }
-            Some("n") => check_against_schema(child, child_cfg, &format!("{at} {key}"))?,
+            Some("n") => check_against_schema(child, child_cfg, &format!("{at} {key}"), train)?,
             _ => {}
         }
     }
     Ok(())
 }
 
+/// Drop from `cfg` whatever the schema under `node` does not have on
+/// `train`, so the sample config fits the release being emulated.
+fn prune_to_train(node: &Value, cfg: &mut Value, train: &str) {
+    let Value::Object(map) = cfg else {
+        return;
+    };
+    map.retain(|key, child_cfg| {
+        let Some(child) = node
+            .get("c")
+            .and_then(|c| c.get(key.as_str()))
+            .and_then(|c| on_train(c, train))
+        else {
+            return false;
+        };
+        match child["k"].as_str() {
+            Some("t") => {
+                if let Value::Object(entries) = child_cfg {
+                    for entry in entries.values_mut() {
+                        prune_to_train(child, entry, train);
+                    }
+                }
+            }
+            Some("n") => prune_to_train(child, child_cfg, train),
+            _ => {}
+        }
+        true
+    });
+}
+
 pub struct MockOp {
     started: Instant,
+    /// The release train the mock claims to be, and validates against.
+    train: String,
     /// The whole config tree Azalea edits (`interfaces`, `nat`, `nat64`,
     /// `nat66`, `protocols`), in VyOS's JSON rendering.
     config: Mutex<Value>,
@@ -137,11 +199,31 @@ const TRAITS: &[(&str, bool, &str, u64)] = &[
 ];
 
 impl MockOp {
+    /// A VyOS 1.5 (circinus) router.
     pub fn new() -> Self {
-        Self {
-            started: Instant::now(),
-            config: Mutex::new(Self::initial_config()),
+        Self::with_train("circinus").expect("circinus is a known train")
+    }
+
+    /// A router on one of `TRAINS`; the sample config is trimmed to
+    /// what that release knows.
+    pub fn with_train(train: &str) -> Result<Self, String> {
+        if !TRAINS.contains(&train) {
+            return Err(format!(
+                "{train}: not a release train (one of {})",
+                TRAINS.join(", ")
+            ));
         }
+        let mut config = Self::initial_config();
+        if let Value::Object(roots) = &mut config {
+            for (root, subtree) in roots.iter_mut() {
+                prune_to_train(&schema()["roots"][root], subtree, train);
+            }
+        }
+        Ok(Self {
+            started: Instant::now(),
+            train: train.to_string(),
+            config: Mutex::new(config),
+        })
     }
 
     /// The mock router's config: one of every interface, a little NAT
@@ -512,10 +594,15 @@ impl MockOp {
 #[async_trait::async_trait]
 impl OpBackend for MockOp {
     async fn system_info(&self) -> Result<SystemInfo, OpError> {
+        let version = match self.train.as_str() {
+            "sagitta" => "1.4.1",
+            "circinus" => "1.5.0",
+            _ => "1.5-rolling-202607062307",
+        };
         Ok(SystemInfo {
             hostname: "vyos-mock".into(),
-            version: "1.5.0".into(),
-            release_train: "circinus".into(),
+            version: version.into(),
+            release_train: self.train.clone(),
             built_on: "Thu 28 May 2026 12:00 UTC".into(),
             architecture: "x86_64".into(),
             boot_via: "installed image".into(),
@@ -629,7 +716,7 @@ impl ConfigBackend for MockOp {
         let mut sets = Vec::new();
         for p in &batch.set {
             validate_mock(p)?;
-            let leaf = classify(p).map_err(ConfigError::Rejected)?;
+            let leaf = classify(p, &self.train).map_err(ConfigError::Rejected)?;
             // `set interfaces ethernet eth9 vif 1` commits fine on VyOS
             // until the device is looked up; the mock knows now.
             if p.len() >= 5
@@ -719,8 +806,17 @@ mod tests {
         for (root, subtree) in cfg.as_object().unwrap() {
             let node = &schema()["roots"][root];
             assert!(!node.is_null(), "{root}: no schema");
-            check_against_schema(node, subtree, root).unwrap();
+            check_against_schema(node, subtree, root, "circinus").unwrap();
         }
+        // Pruned to 1.4 the sample loses CGNAT, and still fits.
+        let old = MockOp::with_train("sagitta").unwrap();
+        let cfg = old.config().clone();
+        assert!(cfg["nat"].get("cgnat").is_none());
+        assert!(cfg["nat"]["source"]["rule"]["100"].is_object());
+        for (root, subtree) in cfg.as_object().unwrap() {
+            check_against_schema(&schema()["roots"][root], subtree, root, "sagitta").unwrap();
+        }
+        assert!(MockOp::with_train("equuleus").is_err());
         // One row per configurable kind, at least.
         let names: Vec<String> = MockOp::new().table().into_iter().map(|i| i.name).collect();
         for kind in InterfaceKind::CONFIGURABLE {
@@ -735,7 +831,7 @@ mod tests {
 
     #[test]
     fn paths_are_classified_by_the_schema() {
-        let c = |p: &str| classify(&word(p));
+        let c = |p: &str| classify(&word(p), "circinus");
         let single = tree::Leaf::Single;
         let multi = tree::Leaf::Multi;
         let node = tree::Leaf::Node;
@@ -791,7 +887,8 @@ mod tests {
         );
         assert_eq!(c("protocols ospf area 0 network 10.0.0.0/8").unwrap(), multi);
         assert_eq!(c("protocols rip passive-interface eth0").unwrap(), multi);
-        assert!(c("protocols openfabric domain core log-adjacency-changes").is_ok());
+        // OpenFabric is rolling-only; see paths_are_classified_per_train.
+        assert!(c("protocols openfabric domain core log-adjacency-changes").is_err());
         assert!(c("protocols nonsense").is_err());
         assert!(c("interfaces ethernet eth0 nonsense x").is_err());
         assert!(c("interfaces ethernet eth0 description").is_err());
@@ -799,6 +896,26 @@ mod tests {
         assert!(c("interfaces ethernet eth0 mtu 1500 extra").is_err());
         assert!(c("interfaces gre gre0 remote x").is_err());
         assert!(c("system host-name x").is_err());
+    }
+
+    #[test]
+    fn paths_are_classified_per_train() {
+        let on = |train: &str, p: &str| classify(&word(p), train);
+        // Added in 1.5.
+        assert!(on("sagitta", "nat cgnat rule 10").is_err());
+        assert!(on("circinus", "nat cgnat rule 10").is_ok());
+        // Rolling only.
+        assert!(on("circinus", "protocols openfabric net 49.0001.1111.1111.1111.00").is_err());
+        assert!(on("rolling", "protocols openfabric net 49.0001.1111.1111.1111.00").is_ok());
+        // A leaf that became a tag node: each train gets its own kind.
+        assert_eq!(
+            on("circinus", "protocols mpls ldp interface eth0").unwrap(),
+            tree::Leaf::Multi
+        );
+        assert_eq!(
+            on("rolling", "protocols mpls ldp interface eth0").unwrap(),
+            tree::Leaf::Node
+        );
     }
 
     #[tokio::test]

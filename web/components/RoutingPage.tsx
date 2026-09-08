@@ -4,9 +4,10 @@ import Shell from '@/components/Shell';
 import { api, compareNames } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { useDetail } from '@/lib/detail';
+import { TRAIN_LABEL, useTrain } from '@/lib/train';
 import type { ConfigApplied, Interface, ScopeConfig, ScopeConfigChange } from '@/lib/types';
 import { VYOS_PROTOCOLS } from '@/lib/vyos-protocols.generated';
-import { diffTree, getIn, humanize, isTree, validateTree, type CfgTree, type SchemaNode } from '@/lib/vyos-schema';
+import { diffTree, forTrain, getIn, humanize, isTree, validateTree, type CfgTree, type SchemaNode } from '@/lib/vyos-schema';
 import { basicSchema, countLeaves } from '@/lib/basic-options';
 import { ROUTING_SPECS, type RoutingSlug } from '@/lib/routing-tables';
 import { nounOf, type RuleTab } from '@/lib/config-tables';
@@ -55,17 +56,28 @@ export interface RoutingPageProps {
 
 export function RoutingPage({ slug }: RoutingPageProps) {
   const spec = ROUTING_SPECS[slug];
-  const protocol = useMemo(() => VYOS_PROTOCOLS.children?.find((c) => c.name === spec.scope), [spec.scope]);
+  const train = useTrain();
+  // The protocol as the router's release has it; undefined when it has none.
+  const protocol = useMemo(
+    () =>
+      forTrain(
+        VYOS_PROTOCOLS.children?.find((c) => c.name === spec.scope),
+        train,
+      ),
+    [spec.scope, train],
+  );
+  const tables = useMemo(() => spec.tables.filter((t) => schemaAt(protocol, t.path)), [spec, protocol]);
   const settingsSchema = useMemo(
     () => (protocol ? without(protocol, [...spec.tables.map((t) => t.path), ...(spec.omit ?? []).map((n) => [n])]) : undefined),
     [protocol, spec],
   );
   const hasSettings = !spec.part && !!settingsSchema?.children?.length;
   const tabIds = useMemo(() => {
-    const tables = spec.tables.map((t) => t.id);
-    if (!hasSettings) return tables;
-    return spec.tablesFirst ? [...tables, SETTINGS] : [SETTINGS, ...tables];
-  }, [spec, hasSettings]);
+    const ids = tables.map((t) => t.id);
+    if (!hasSettings) return ids;
+    return spec.tablesFirst ? [...ids, SETTINGS] : [SETTINGS, ...ids];
+  }, [spec, tables, hasSettings]);
+  const unsupported = !protocol || tabIds.length === 0;
 
   const [loaded, setLoaded] = useState<ScopeConfig | null>(null);
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
@@ -104,7 +116,7 @@ export function RoutingPage({ slug }: RoutingPageProps) {
 
   const config: CfgTree = loaded && isTree(loaded.config) ? loaded.config : {};
   const configured = Object.keys(config).length > 0;
-  const tab: RuleTab | undefined = spec.tables.find((t) => t.id === tabId);
+  const tab: RuleTab | undefined = tables.find((t) => t.id === tabId);
   const entriesOf = (t: RuleTab): CfgTree => {
     const n = getIn(config, t.path);
     return isTree(n) ? n : {};
@@ -157,7 +169,7 @@ export function RoutingPage({ slug }: RoutingPageProps) {
     <Shell>
       <div className="page-header">
         <h2>{spec.title}</h2>
-        {loaded && (configured ? <Label status="success">Configured</Label> : <Label>Not configured</Label>)}
+        {unsupported ? <Label status="warning">Not on this release</Label> : loaded && (configured ? <Label status="success">Configured</Label> : <Label>Not configured</Label>)}
         {loaded && configured && !spec.part && (
           <Button sm variant="danger-outline" icon="trash" disabled={!admin || busy} title={needAdmin ?? `Delete protocols ${spec.scope} and everything under it`} onClick={() => setRemoving(true)}>
             Remove {spec.title}
@@ -167,7 +179,12 @@ export function RoutingPage({ slug }: RoutingPageProps) {
       <p className="dim" style={{ margin: '-8px 0 12px', fontSize: 13 }}>
         {spec.intro}
       </p>
-      {spec.note && (
+      {unsupported && (
+        <Alert status="warning" style={{ marginBottom: 12 }}>
+          {TRAIN_LABEL[train]} has no {spec.title}; this page is for routers on a release that does.
+        </Alert>
+      )}
+      {!unsupported && spec.note && (
         <Alert status="warning" style={{ marginBottom: 12 }}>
           {spec.note}
         </Alert>
@@ -190,7 +207,7 @@ export function RoutingPage({ slug }: RoutingPageProps) {
             if (id === SETTINGS) {
               return { id, label: 'Settings', badge: nChanges > 0 ? <span className="cfg-group-count cfg-group-count-warn">{nChanges}</span> : undefined };
             }
-            const t = spec.tables.find((x) => x.id === id)!;
+            const t = tables.find((x) => x.id === id)!;
             return { id, label: t.label, badge: <span className="cfg-group-count">{Object.keys(entriesOf(t)).length}</span> };
           })}
           active={tabId}
@@ -200,7 +217,7 @@ export function RoutingPage({ slug }: RoutingPageProps) {
           }}
         />
       )}
-      {!loaded && !error && (
+      {!loaded && !error && !unsupported && (
         <div className="page-loading">
           <span className="spinner spinner-md"></span>Loading…
         </div>

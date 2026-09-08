@@ -4,19 +4,26 @@
 // the schema, and diff two trees into set/delete commands.
 
 import type { CfgNode, InterfaceKind } from './types';
+import type { VyosTrain } from './train';
 
-/** One node of `interfaces <type>`, as VyOS declares it. */
+/** One node of the VyOS config tree, as vyos-1x declares it. */
 export interface SchemaNode {
   name: string;
   /** `node` groups children; `tag` is keyed (`peer <name>`); `leaf` holds values. */
   kind: 'node' | 'tag' | 'leaf';
   help?: string;
+  /**
+   * The release trains that have this node, when not all of them do.
+   * Siblings may share a name with different `only` sets (a node whose
+   * kind changed between releases); `forTrain` leaves exactly one.
+   */
+  only?: VyosTrain[];
   /** A leaf that is set or not, with no value. */
   valueless?: boolean;
   /** A leaf holding several values. */
   multi?: boolean;
   /** Enumerated choices (completionHelp list), with per-value help. */
-  values?: { value: string; help: string }[];
+  values?: { value: string; help: string; only?: VyosTrain[] }[];
   /** Free-form value formats (valueHelp), e.g. `ipv4net` or `u32:68-16000`. */
   formats?: { format: string; help: string }[];
   /** Completion from another config path, e.g. `interfaces ethernet`. */
@@ -65,6 +72,35 @@ export function setIn(tree: CfgTree, path: string[], value: CfgNode | undefined)
 }
 
 export const schemaFor = (kind: InterfaceKind, all: Record<string, SchemaNode>): SchemaNode | undefined => all[kind];
+
+const trainCache = new Map<VyosTrain, WeakMap<SchemaNode, SchemaNode | null>>();
+
+/**
+ * The schema as one release train sees it: nodes and enumerated values
+ * the train lacks are gone, so the editors never offer them. Undefined
+ * when the node itself is not on that train. Memoised per node and
+ * train, so repeated calls hand back the same object.
+ */
+export function forTrain(node: SchemaNode | undefined, train: VyosTrain): SchemaNode | undefined {
+  if (!node) return undefined;
+  let cache = trainCache.get(train);
+  if (!cache) {
+    cache = new WeakMap();
+    trainCache.set(train, cache);
+  }
+  const hit = cache.get(node);
+  if (hit !== undefined) return hit ?? undefined;
+  const has = (only?: VyosTrain[]) => !only || only.includes(train);
+  let out: SchemaNode | null = null;
+  if (has(node.only)) {
+    out = { ...node };
+    delete out.only;
+    if (node.values) out.values = node.values.filter((v) => has(v.only)).map(({ only: _only, ...v }) => v);
+    if (node.children) out.children = node.children.map((c) => forTrain(c, train)).filter((c): c is SchemaNode => c !== undefined);
+  }
+  cache.set(node, out);
+  return out ?? undefined;
+}
 
 // --------------------------------------------------------------- labels
 

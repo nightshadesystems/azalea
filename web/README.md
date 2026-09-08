@@ -18,6 +18,10 @@ Run the daemon off-box:
     cargo run -p azalea-webd -- --http-port 8080 --dev-listen http \
         --dev-auth admin:admin --assets web/out --mock
 
+`--mock-train sagitta|circinus|rolling` picks which VyOS release the
+mock claims to be (1.4, 1.5, rolling); the UI hides what that release
+lacks, the same as it does for a real router.
+
 then open http://localhost:8080. For hot reload run `npm run dev`; it
 proxies `/api/*` to port 8080 (override with `AZALEA_WEBD_URL`). Next's
 rewrites do not carry WebSockets, so under `npm run dev` the Interfaces

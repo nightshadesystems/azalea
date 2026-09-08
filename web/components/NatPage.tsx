@@ -5,22 +5,23 @@ import { api, compareNames } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import type { ConfigApplied, Interface, ScopeConfig, ScopeConfigChange } from '@/lib/types';
 import { VYOS_ROOTS } from '@/lib/vyos-interfaces.generated';
-import { getIn, isTree, type CfgTree, type SchemaNode } from '@/lib/vyos-schema';
+import { forTrain, getIn, isTree, type CfgTree, type SchemaNode } from '@/lib/vyos-schema';
+import { TRAIN_LABEL, useTrain, type VyosTrain } from '@/lib/train';
 import { NAT_SPECS, type NatScope, type RuleTab } from '@/lib/nat-tables';
 import { nounOf } from '@/lib/config-tables';
-import { Alert } from '@/components/ds/misc';
+import { Alert, Label } from '@/components/ds/misc';
 import { Button } from '@/components/ds/Button';
 import { Checkbox } from '@/components/ds/forms';
 import { Datagrid } from '@/components/ds/Datagrid';
 import { Tabs } from '@/components/ds/Tabs';
 import { DeleteRulesModal, RuleEditModal, type RuleTarget } from '@/components/RuleEditModal';
 
-/** The schema node each scope edits. */
-function scopeSchema(scope: NatScope): SchemaNode | undefined {
-  const nat = VYOS_ROOTS['nat'];
+/** The schema node each scope edits, as the router's release has it. */
+function scopeSchema(scope: NatScope, train: VyosTrain): SchemaNode | undefined {
+  const nat = forTrain(VYOS_ROOTS['nat'], train);
   if (scope === 'nat44') return nat;
   if (scope === 'cgnat') return nat?.children?.find((c) => c.name === 'cgnat');
-  return VYOS_ROOTS[scope];
+  return forTrain(VYOS_ROOTS[scope], train);
 }
 
 /** Walk a schema node down a path of child names. */
@@ -51,6 +52,10 @@ export function NatPage({ scope }: NatPageProps) {
   const [busy, setBusy] = useState(false);
   const clearSelection = useRef<() => void>(() => {});
   const admin = !!useSession()?.admin;
+  const train = useTrain();
+  const scopeNode = useMemo(() => scopeSchema(scope, train), [scope, train]);
+  // Only the tables this release has.
+  const tabs = useMemo(() => spec.tabs.filter((t) => schemaAt(scopeNode, t.path)), [spec, scopeNode]);
 
   const load = useCallback(() => {
     api<ScopeConfig>(`/api/config/nat/${scope}`)
@@ -63,7 +68,7 @@ export function NatPage({ scope }: NatPageProps) {
   }, [scope]);
   useEffect(load, [load]);
 
-  const tab: RuleTab = spec.tabs.find((t) => t.id === tabId) ?? spec.tabs[0]!;
+  const tab: RuleTab = tabs.find((t) => t.id === tabId) ?? tabs[0] ?? spec.tabs[0]!;
   const config: CfgTree = loaded && isTree(loaded.config) ? loaded.config : {};
   const entriesOf = (t: RuleTab): CfgTree => {
     const n = getIn(config, t.path);
@@ -76,7 +81,7 @@ export function NatPage({ scope }: NatPageProps) {
       .sort(compare)
       .map((key) => ({ key, entry: isTree(entries[key]) ? (entries[key] as CfgTree) : {} }));
   }, [entries, tab.numeric]);
-  const tagSchema = schemaAt(scopeSchema(scope), tab.path);
+  const tagSchema = schemaAt(scopeNode, tab.path);
   const ctx = useMemo(() => ({ interfaces: interfaces.map((i) => i.name).sort(compareNames) }), [interfaces]);
 
   const saved = (what: string, output: string) => {
@@ -107,6 +112,7 @@ export function NatPage({ scope }: NatPageProps) {
     <Shell>
       <div className="page-header">
         <h2>{spec.title}</h2>
+        {!scopeNode && <Label status="warning">Not on this release</Label>}
       </div>
       <p className="dim" style={{ margin: '-8px 0 12px', fontSize: 13 }}>
         {spec.intro}
@@ -122,9 +128,15 @@ export function NatPage({ scope }: NatPageProps) {
           {notice.detail && <pre style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap', fontSize: 12 }}>{notice.detail}</pre>}
         </Alert>
       )}
+      {!scopeNode && (
+        <Alert status="warning" style={{ marginBottom: 16 }}>
+          {TRAIN_LABEL[train]} has no {spec.title}; this page is for routers on a release that does.
+        </Alert>
+      )}
+      {scopeNode && (
       <Tabs
         className="nat-tabs"
-        tabs={spec.tabs.map((t) => ({
+        tabs={tabs.map((t) => ({
           id: t.id,
           label: t.label,
           badge: <span className="cfg-group-count">{Object.keys(entriesOf(t)).length}</span>,
@@ -135,12 +147,13 @@ export function NatPage({ scope }: NatPageProps) {
           clearSelection.current();
         }}
       />
-      {!loaded && !error && (
+      )}
+      {!loaded && !error && scopeNode && (
         <div className="page-loading">
           <span className="spinner spinner-md"></span>Loading…
         </div>
       )}
-      {loaded && (
+      {loaded && scopeNode && (
         <Datagrid<Row>
           key={tab.id}
           selectable

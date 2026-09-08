@@ -63,6 +63,11 @@ struct Args {
     /// Serve a built-in mock router instead of running VyOS op-mode.
     #[arg(long)]
     mock: bool,
+
+    /// Which VyOS release the mock router claims to be: sagitta (1.4),
+    /// circinus (1.5) or rolling. The UI hides what that release lacks.
+    #[arg(long, default_value = "circinus", requires = "mock")]
+    mock_train: String,
 }
 
 fn default_assets_dir() -> PathBuf {
@@ -147,8 +152,8 @@ async fn main() -> Result<()> {
     }
 
     let (op, config): (Arc<dyn OpBackend>, Arc<dyn ConfigBackend>) = if args.mock {
-        warn!("serving the mock router (--mock)");
-        let mock = Arc::new(MockOp::new());
+        warn!(train = %args.mock_train, "serving the mock router (--mock)");
+        let mock = Arc::new(MockOp::with_train(&args.mock_train).map_err(|e| anyhow::anyhow!(e))?);
         (mock.clone(), mock)
     } else {
         if !azalea_vyos::config::available() {

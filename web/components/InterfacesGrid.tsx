@@ -4,6 +4,7 @@ import Shell from '@/components/Shell';
 import { api, compareNames } from '@/lib/api';
 import { useCounterStream } from '@/lib/stream';
 import { useSession } from '@/lib/session';
+import { available, TRAIN_LABEL, useTrain } from '@/lib/train';
 import type { Interface, InterfaceKind } from '@/lib/types';
 import { Alert, Label } from '@/components/ds/misc';
 import { Button } from '@/components/ds/Button';
@@ -32,7 +33,10 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
   const clearSelection = useRef<() => void>(() => {});
   // One kind per page; everything but physical ports and `lo` can be made and unmade.
   const kind = kinds.length === 1 ? kinds[0] : null;
-  const creatable = kind != null && kind !== 'ethernet' && kind !== 'loopback';
+  const train = useTrain();
+  // A VLAN is a `vif` of its parent; every other kind is its own node.
+  const supported = kind == null || kind === 'vlan' || available(['interfaces', kind], train);
+  const creatable = kind != null && kind !== 'ethernet' && kind !== 'loopback' && supported;
   const kindLabel = kind ? KIND_LABEL[kind] : 'interface';
   const { live, connected } = useCounterStream();
   const admin = !!useSession()?.admin;
@@ -86,6 +90,11 @@ export function InterfacesGrid({ title, kinds }: InterfacesGridProps) {
       {error && (
         <Alert status="danger" style={{ marginBottom: 16 }}>
           {error}
+        </Alert>
+      )}
+      {!supported && (
+        <Alert status="warning" style={{ marginBottom: 16 }}>
+          {TRAIN_LABEL[train]} has no {kindLabel} interfaces; nothing can be created here on this router.
         </Alert>
       )}
       {notice && (
